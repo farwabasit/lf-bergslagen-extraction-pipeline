@@ -124,11 +124,19 @@ def run_agent(history: list[dict]) -> str:
     messages = [{"role": "system", "content": SYSTEM_PROMPT}, *history]
     seen_urls: set[str] = set()
 
-    for _ in range(MAX_TOOL_ROUNDS):
+    for round_index in range(MAX_TOOL_ROUNDS):
+        # The model isn't reliably grounding itself on its own - it sometimes
+        # answers straight from general knowledge, which means no real links
+        # and unverified claims. Forcing a fetch on the first call of every
+        # turn guarantees every reply has at least one real, current source
+        # behind it (a fetch of an irrelevant topic before a clarifying
+        # question is a harmless cost next to an ungrounded answer).
+        tool_choice = "required" if round_index == 0 else "auto"
         response = client.chat.completions.create(
             model=config.OPENROUTER_MODEL,
             messages=messages,
             tools=TOOLS,
+            tool_choice=tool_choice,
             temperature=0.4,
         )
         choice = response.choices[0].message
@@ -157,8 +165,16 @@ def run_agent(history: list[dict]) -> str:
                 args = json.loads(call.function.arguments or "{}")
             except json.JSONDecodeError:
                 args = {}
-            result = fetch_lf_page(args.get("topic", ""))
+            topic = args.get("topic", "")
+            result = fetch_lf_page(topic)
             seen_urls.update(URL_RE.findall(result))
+            if topic in LF_PAGES:
+                # The page's own URL is real and was just fetched, but
+                # _extract_links deliberately excludes self-links (to filter
+                # out region-switcher noise), so it never appears inside the
+                # tool result text itself - add it explicitly or a correct
+                # reference to the page just fetched gets wrongly stripped.
+                seen_urls.add(LF_PAGES[topic])
             messages.append(
                 {"role": "tool", "tool_call_id": call.id, "content": result}
             )
