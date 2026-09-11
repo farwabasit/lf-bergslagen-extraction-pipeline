@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Life Transition Navigator</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark">LF</span>
+      <span class="brand-name">Life Transition Navigator</span>
+    </div>
+    <span class="brand-sub">LF Bergslagen</span>
+  </header>
+
+  <main class="chat-shell">
+    <div id="messages" class="messages">
+      <div class="msg assistant">
+        <p>Hi, I'm your Life Transition Navigator. Tell me what's changing in your life, and I'll help you figure out what to do first.</p>
+      </div>
+    </div>
+
+    <div id="chips" class="chips">
+      <button class="chip" data-text="I just bought my first apartment">Buying a first home</button>
+      <button class="chip" data-text="My partner and I are moving in together">Moving in together</button>
+      <button class="chip" data-text="We're having a baby soon">Having a child</button>
+      <button class="chip" data-text="I'm going through a divorce">Divorce</button>
+      <button class="chip" data-text="I'm starting my own business">Starting a business</button>
+      <button class="chip" data-text="I'm retiring soon">Retirement</button>
+    </div>
+
+    <form id="chat-form" class="composer">
+      <input id="chat-input" type="text" placeholder="Tell me what's happening in your life..." autocomplete="off" />
+      <button type="submit">Send</button>
+    </form>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
