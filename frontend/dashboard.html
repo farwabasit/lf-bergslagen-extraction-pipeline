@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Support Dashboard — Life Transition Navigator</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="dashboard.css" />
+</head>
+<body class="dashboard-body">
+  <header class="topbar">
+    <div class="brand">
+      <span class="avatar avatar-human">LF</span>
+      <div class="brand-text">
+        <span class="brand-name">Support Dashboard</span>
+        <span class="brand-sub">LF Bergslagen · Live chats</span>
+      </div>
+    </div>
+  </header>
+
+  <main class="dashboard-shell">
+    <aside class="session-list" id="session-list">
+      <p class="empty-hint">Waiting for chats...</p>
+    </aside>
+
+    <section class="conversation-pane">
+      <div id="conversation-header" class="conversation-header">Select a conversation</div>
+      <div id="conversation-messages" class="messages dashboard-messages"></div>
+      <form id="reply-form" class="composer" hidden>
+        <input id="reply-name" type="text" placeholder="Your name (e.g. Anna)" autocomplete="off" class="reply-name" />
+        <input id="reply-input" type="text" placeholder="Type your reply..." autocomplete="off" />
+        <button type="submit">Send</button>
+      </form>
+    </section>
+  </main>
+
+  <script src="dashboard.js"></script>
+</body>
+</html>

@@ -8,34 +8,49 @@
 </head>
 <body>
   <header class="topbar">
-    <div class="brand">
-      <span class="brand-mark">LF</span>
-      <span class="brand-name">Life Transition Navigator</span>
-    </div>
-    <span class="brand-sub">LF Bergslagen</span>
-  </header>
-
-  <main class="chat-shell">
-    <div id="messages" class="messages">
-      <div class="msg assistant">
-        <p>Hi, I'm your Life Transition Navigator. Tell me what's changing in your life, and I'll help you figure out what to do first.</p>
+    <div class="brand" id="home-btn" role="button" tabindex="0" title="Start a new chat">
+      <span class="avatar avatar-ai">S</span>
+      <div class="brand-text">
+        <span class="brand-name">Sara</span>
+        <span class="brand-sub">Digital assistant · LF Bergslagen</span>
       </div>
     </div>
-
-    <div id="chips" class="chips">
-      <button class="chip" data-text="I just bought my first apartment">Buying a first home</button>
-      <button class="chip" data-text="My partner and I are moving in together">Moving in together</button>
-      <button class="chip" data-text="We're having a baby soon">Having a child</button>
-      <button class="chip" data-text="I'm going through a divorce">Divorce</button>
-      <button class="chip" data-text="I'm starting my own business">Starting a business</button>
-      <button class="chip" data-text="I'm retiring soon">Retirement</button>
+    <div class="header-actions">
+      <div class="lang-toggle" id="lang-toggle">
+        <button class="lang-btn" data-lang="en" type="button">EN</button>
+        <button class="lang-btn" data-lang="sv" type="button">SV</button>
+      </div>
+      <button id="human-btn" class="human-btn" type="button">Talk to a person</button>
     </div>
+  </header>
 
-    <form id="chat-form" class="composer">
-      <input id="chat-input" type="text" placeholder="Tell me what's happening in your life..." autocomplete="off" />
-      <button type="submit">Send</button>
-    </form>
-  </main>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <button id="new-chat-btn" class="new-chat-btn" type="button">+ New chat</button>
+      <div id="chat-list" class="chat-list"></div>
+    </aside>
+
+    <main class="chat-shell">
+      <div id="messages" class="messages">
+        <div class="msg assistant">
+          <span class="msg-label" id="greeting-label">Sara · AI assistant</span>
+          <p id="greeting-text">Hej! I'm Sara, LF Bergslagen's digital assistant. Tell me what's changing in your life, and I'll help you think it through.</p>
+        </div>
+      </div>
+
+      <div id="chips" class="chips"></div>
+
+      <div id="attachment-preview" class="attachment-preview" hidden></div>
+
+      <form id="chat-form" class="composer">
+        <input id="file-input" type="file" accept=".pdf,.txt" hidden />
+        <button id="attach-btn" class="icon-btn" type="button" title="Attach a document">📎</button>
+        <button id="mic-btn" class="icon-btn" type="button" title="Speak instead of typing" hidden>🎤</button>
+        <input id="chat-input" type="text" placeholder="Tell me what's happening in your life..." autocomplete="off" />
+        <button id="send-btn" type="submit">Send</button>
+      </form>
+    </main>
+  </div>
 
   <script src="app.js"></script>
 </body>
