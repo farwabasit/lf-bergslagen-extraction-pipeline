@@ -464,24 +464,79 @@ body {
 }
 
 .chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
   padding: 8px 0 4px;
 }
 
-.chip {
-  background: white;
-  border: 1px solid var(--border);
-  color: var(--lf-blue-dark);
-  border-radius: 999px;
-  padding: 6px 12px;
-  font-size: 13px;
-  cursor: pointer;
+/* The initial "not sure where to start" topic list -- a dropdown instead
+   of a big wrapped grid of pill buttons, so it stays compact both on the
+   full-page chat and when the chat is embedded narrow (see site.js widget). */
+.topic-dropdown {
+  display: inline-block;
+  position: relative;
 }
 
-.chip:hover {
+.topic-dropdown-toggle {
+  align-items: center;
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--lf-blue-dark);
+  cursor: pointer;
+  display: flex;
+  font-size: 13.5px;
+  font-weight: 600;
+  gap: 8px;
+  padding: 8px 12px;
+}
+
+.topic-dropdown-toggle:hover {
+  border-color: var(--lf-blue);
+}
+
+.topic-dropdown-toggle .caret {
+  color: var(--text-muted);
+  font-size: 11px;
+  transition: transform 0.15s ease;
+}
+
+.topic-dropdown-toggle.open .caret {
+  transform: rotate(180deg);
+}
+
+.topic-dropdown-menu {
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  bottom: 100%;
+  box-shadow: 0 12px 30px rgba(9, 41, 68, 0.15);
+  left: 0;
+  margin-bottom: 6px;
+  max-height: 260px;
+  overflow-y: auto;
+  position: absolute;
+  width: max(240px, 100%);
+  z-index: 20;
+}
+
+.topic-dropdown-item {
+  background: none;
+  border: none;
+  color: var(--text-main);
+  cursor: pointer;
+  display: block;
+  font-size: 13.5px;
+  padding: 9px 12px;
+  text-align: left;
+  width: 100%;
+}
+
+.topic-dropdown-item:hover {
   background: #eef3f8;
+  color: var(--lf-blue-dark);
+}
+
+.topic-dropdown-item + .topic-dropdown-item {
+  border-top: 1px solid var(--border);
 }
 
 .suggestions {
@@ -654,6 +709,17 @@ body {
   cursor: pointer;
   font-size: 15px;
   line-height: 1;
+}
+
+/* Set on <body> by app.js when this page is embedded as a small widget
+   (see site.js) -- there's no room for the new-chat/previous-chats
+   sidebar at that size, so hide it outright instead of shrinking it to
+   an icon-only column. Maximizing the widget removes this class, and
+   the sidebar reappears at full size (its width is well above the
+   640px breakpoint below by then). Standalone/mobile use of this page
+   never gets this class, so its own icon-only collapse is unaffected. */
+body.widget-compact .sidebar {
+  display: none;
 }
 
 @media (max-width: 640px) {

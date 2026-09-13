@@ -40,6 +40,7 @@ const I18N = {
     uploadError: "Couldn't read one of those files. Try files under 5MB each.",
     chatError: "Something went wrong reaching the navigator. Please try again.",
     speechLang: "en-US",
+    topicPrompt: "Not sure where to start? Choose a topic",
     chips: [
       { label: "Buying a house", text: "I'd like help with buying a house" },
       { label: "Moving in together", text: "My partner and I are moving in together" },
@@ -77,6 +78,7 @@ const I18N = {
     uploadError: "Kunde inte läsa en av filerna. Prova filer under 5 MB styck.",
     chatError: "Något gick fel. Försök igen.",
     speechLang: "sv-SE",
+    topicPrompt: "Osäker på var du ska börja? Välj ett ämne",
     chips: [
       { label: "Köpa hus", text: "Jag skulle vilja ha hjälp med att köpa hus" },
       { label: "Flytta ihop", text: "Min partner och jag ska flytta ihop" },
@@ -118,13 +120,34 @@ function applyLanguage(lang) {
   micBtn.title = strings.micTitle;
 
   chipsEl.innerHTML = "";
+  const dropdown = document.createElement("div");
+  dropdown.className = "topic-dropdown";
+
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.className = "topic-dropdown-toggle";
+  toggle.innerHTML = `<span>${strings.topicPrompt}</span><span class="caret">▾</span>`;
+
+  const menu = document.createElement("div");
+  menu.className = "topic-dropdown-menu";
+  menu.hidden = true;
+
   for (const chip of strings.chips) {
-    const btn = document.createElement("button");
-    btn.className = "chip";
-    btn.dataset.text = chip.text;
-    btn.textContent = chip.label;
-    chipsEl.appendChild(btn);
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "topic-dropdown-item";
+    item.dataset.text = chip.text;
+    item.textContent = chip.label;
+    menu.appendChild(item);
   }
+
+  toggle.addEventListener("click", () => {
+    menu.hidden = !menu.hidden;
+    toggle.classList.toggle("open", !menu.hidden);
+  });
+
+  dropdown.append(toggle, menu);
+  chipsEl.appendChild(dropdown);
 
   langToggleEl.querySelectorAll(".lang-btn").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.lang === currentLang);
@@ -740,9 +763,30 @@ inputEl.addEventListener("input", () => {
 });
 
 chipsEl.addEventListener("click", (e) => {
-  const btn = e.target.closest(".chip");
+  const btn = e.target.closest(".topic-dropdown-item");
   if (!btn) return;
   sendMessage(btn.dataset.text);
+});
+
+// Close the topic dropdown when clicking outside it or pressing Escape.
+document.addEventListener("click", (e) => {
+  const toggle = chipsEl.querySelector(".topic-dropdown-toggle");
+  const menu = chipsEl.querySelector(".topic-dropdown-menu");
+  if (!toggle || !menu || menu.hidden) return;
+  if (!e.target.closest(".topic-dropdown")) {
+    menu.hidden = true;
+    toggle.classList.remove("open");
+  }
+});
+
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  const toggle = chipsEl.querySelector(".topic-dropdown-toggle");
+  const menu = chipsEl.querySelector(".topic-dropdown-menu");
+  if (menu && !menu.hidden) {
+    menu.hidden = true;
+    toggle.classList.remove("open");
+  }
 });
 
 // --- Document upload ---
@@ -994,6 +1038,20 @@ async function loadChat(id) {
     console.error(err);
   }
 }
+
+// --- Embeddable widget integration: lets a parent marketing page (see
+// site.html/site.js) trigger a message in this chat from the outside,
+// e.g. when a visitor clicks a "life moment" card on the public site. ---
+window.addEventListener("message", (event) => {
+  const data = event.data;
+  if (data && data.type === "ltn-send" && typeof data.text === "string") {
+    sendMessage(data.text);
+  } else if (data && data.type === "ltn-widget-mode") {
+    // Sent by site.js: "compact" (small bubble -- no room for the
+    // sidebar) or "full" (maximized -- show the normal full interface).
+    document.body.classList.toggle("widget-compact", data.mode === "compact");
+  }
+});
 
 homeBtn.addEventListener("click", startNewChat);
 homeBtn.addEventListener("keydown", (e) => {
