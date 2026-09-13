@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LF Bergslagen — Customer Service Workspace</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="avatar">CS</span>
+      <div class="brand-text">
+        <span class="brand-name">Customer Service Workspace</span>
+        <span class="brand-sub">LF Bergslagen · internal demo</span>
+      </div>
+    </div>
+    <div class="agent-name-field">
+      <label for="role-select">Role</label>
+      <select id="role-select">
+        <option value="">Select role...</option>
+        <option value="CS_REP">Customer Service Rep</option>
+        <option value="ADVISOR">Advisor</option>
+        <option value="OPERATIONS">Operations</option>
+      </select>
+      <label for="agent-name">Agent name</label>
+      <input id="agent-name" type="text" placeholder="e.g. Björn" />
+    </div>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab-btn active" data-tab="cases" data-roles="ADVISOR,OPERATIONS,CS_REP">Case Queue</button>
+    <button class="tab-btn" data-tab="chats" data-roles="CS_REP">Live Chat Requests</button>
+  </nav>
+
+  <div id="role-gate" class="role-gate" hidden>
+    <div class="role-gate-card">
+      <h2>Select your role to continue</h2>
+      <p>What you can see and do here depends on your role - a Customer Service
+      Rep handles live chats, an Advisor works cases routed for review, and
+      Operations handles approved fulfilment tasks.</p>
+    </div>
+  </div>
+
+  <main class="content">
+    <section id="tab-cases" class="tab-panel active">
+      <div class="panel-header">
+        <h2>Cases</h2>
+        <div class="filters">
+          <select id="filter-type">
+            <option value="">All types</option>
+            <option value="CALLBACK">Callback</option>
+            <option value="FRAUD">Fraud</option>
+            <option value="DISPUTE">Dispute</option>
+            <option value="MORTGAGE_APPLICATION">Mortgage application</option>
+            <option value="MORTGAGE_REVIEW">Mortgage - needs review</option>
+            <option value="MORTGAGE_OPERATIONS">Mortgage - operations</option>
+            <option value="OTHER">Other</option>
+          </select>
+          <select id="filter-status">
+            <option value="">All statuses</option>
+            <option value="NEW">New</option>
+            <option value="IN_PROGRESS">In progress</option>
+            <option value="SUBMITTED">Submitted to Operations</option>
+            <option value="RESOLVED">Resolved</option>
+          </select>
+          <button id="refresh-cases" type="button">Refresh</button>
+        </div>
+      </div>
+      <div id="case-list" class="card-list"></div>
+    </section>
+
+    <section id="tab-chats" class="tab-panel">
+      <div class="chats-layout">
+        <div class="chat-request-list-col">
+          <div class="panel-header">
+            <h2>Chat requests</h2>
+            <button id="refresh-chats" type="button">Refresh</button>
+          </div>
+          <div id="chat-request-list" class="card-list"></div>
+        </div>
+        <div class="chat-detail-col">
+          <div id="chat-detail-empty" class="empty-hint">Select a chat request to see the conversation.</div>
+          <div id="chat-detail" hidden>
+            <div class="panel-header">
+              <h2 id="chat-detail-title">Chat</h2>
+              <button id="pickup-chat-btn" type="button">Pick up</button>
+            </div>
+            <div id="chat-transcript" class="transcript"></div>
+            <form id="reply-form" class="reply-form">
+              <textarea id="reply-input" rows="2" placeholder="Type your reply to the customer..."></textarea>
+              <button type="submit">Send</button>
+            </form>
+            <p id="reply-status" class="reply-status"></p>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div id="case-modal" class="modal" hidden>
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 id="case-modal-title">Case</h3>
+        <button id="case-modal-close" type="button" class="icon-btn">✕</button>
+      </div>
+      <div id="case-modal-body" class="modal-body"></div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

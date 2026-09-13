@@ -30,6 +30,7 @@ const I18N = {
     humanConnecting: "Connecting...",
     humanNote:
       "You've asked to speak with a colleague at LF Bergslagen. They'll join this chat as soon as they're available — keep this page open.",
+    agentJoinedSuffix: "has joined the chat and will respond shortly.",
     attachTitle: "Attach a document",
     micTitle: "Speak instead of typing",
     supportLabel: "LF Bergslagen · Support",
@@ -39,12 +40,20 @@ const I18N = {
     chatError: "Something went wrong reaching the navigator. Please try again.",
     speechLang: "en-US",
     chips: [
-      { label: "Buying a first home", text: "I just bought my first apartment" },
+      { label: "Buying a house", text: "I'd like help with buying a house" },
       { label: "Moving in together", text: "My partner and I are moving in together" },
       { label: "Having a child", text: "We're having a baby soon" },
       { label: "Divorce", text: "I'm going through a divorce" },
       { label: "Starting a business", text: "I'm starting my own business" },
       { label: "Retirement", text: "I'm retiring soon" },
+      { label: "Buying a holiday home", text: "I'd like help with buying a holiday home" },
+      { label: "Buying a car", text: "I'd like help with buying a car" },
+      { label: "Report Fraud", text: "I want to report fraud" },
+      { label: "Dispute a Transaction", text: "I want to dispute a transaction" },
+      { label: "My product portfolio", text: "I'd like to see my current products with Länsförsäkringar" },
+      { label: "Request a callback", text: "I'd like to request a callback" },
+      { label: "Check case status", text: "I'd like to check the status of my case" },
+      { label: "Apply for a mortgage", text: "I want to apply for a mortgage" },
     ],
   },
   sv: {
@@ -58,6 +67,7 @@ const I18N = {
     humanConnecting: "Kopplar upp...",
     humanNote:
       "Du har bett om att prata med en kollega på LF Bergslagen. De ansluter till chatten så snart de kan — håll sidan öppen.",
+    agentJoinedSuffix: "har anslutit till chatten och svarar snart.",
     attachTitle: "Bifoga ett dokument",
     micTitle: "Prata istället för att skriva",
     supportLabel: "LF Bergslagen · Support",
@@ -67,12 +77,20 @@ const I18N = {
     chatError: "Något gick fel. Försök igen.",
     speechLang: "sv-SE",
     chips: [
-      { label: "Köpa första bostaden", text: "Jag har precis köpt min första lägenhet" },
+      { label: "Köpa hus", text: "Jag skulle vilja ha hjälp med att köpa hus" },
       { label: "Flytta ihop", text: "Min partner och jag ska flytta ihop" },
       { label: "Väntar barn", text: "Vi ska snart få barn" },
       { label: "Skilsmässa", text: "Jag går igenom en skilsmässa" },
       { label: "Starta eget", text: "Jag ska starta eget företag" },
       { label: "Pension", text: "Jag ska snart gå i pension" },
+      { label: "Köpa fritidshus", text: "Jag skulle vilja ha hjälp med att köpa ett fritidshus" },
+      { label: "Köpa bil", text: "Jag skulle vilja ha hjälp med att köpa en bil" },
+      { label: "Anmäl bedrägeri", text: "Jag vill anmäla ett bedrägeri" },
+      { label: "Bestrid en transaktion", text: "Jag vill bestrida en transaktion" },
+      { label: "Min produktportfölj", text: "Jag skulle vilja se mina nuvarande produkter hos Länsförsäkringar" },
+      { label: "Begär återuppringning", text: "Jag skulle vilja begära en återuppringning" },
+      { label: "Kolla ärendestatus", text: "Jag skulle vilja kolla status på mitt ärende" },
+      { label: "Ansök om bolån", text: "Jag vill ansöka om ett bolån" },
     ],
   },
 };
@@ -120,6 +138,8 @@ langToggleEl.addEventListener("click", (e) => {
 
 let history = [];
 let sessionMessageCount = 0; // how many session-store messages we've already accounted for
+let humanHandoffActive = false; // once true, the composer talks to a human, not the AI
+let lastKnownAgent = null; // name of the CS agent assigned to this session, if any
 let sessionId =
   sessionStorage.getItem("ltn-session-id") ||
   (() => {
@@ -212,19 +232,128 @@ function renderMarkdown(raw) {
   return html;
 }
 
-function addBubble(role, text, { markdown = false, label = "" } = {}) {
+// --- Read-aloud (browser text-to-speech, no backend involved) ---
+
+const speechSupported = "speechSynthesis" in window;
+let speakingBtn = null;
+let cachedVoices = [];
+
+if (speechSupported) {
+  const refreshVoices = () => {
+    cachedVoices = window.speechSynthesis.getVoices();
+  };
+  refreshVoices();
+  window.speechSynthesis.addEventListener("voiceschanged", refreshVoices);
+}
+
+// Prefer a natural-sounding, clearly-female voice matching the reply's
+// language (Sara is presented as a woman) over whatever default voice the
+// browser would otherwise pick, which is often a flat/robotic fallback.
+function pickVoice(lang) {
+  if (!cachedVoices.length) return null;
+  const prefix = lang.split("-")[0];
+  const sameLang = cachedVoices.filter((v) => v.lang && v.lang.toLowerCase().startsWith(prefix));
+  const pool = sameLang.length ? sameLang : cachedVoices;
+  const female = pool.find((v) => /female|zira|susan|hedda|elsa|alva|natural/i.test(v.name));
+  return female || pool[0] || null;
+}
+
+// Strip markdown syntax so the reply is actually spoken as natural language
+// instead of literal symbols ("asterisk asterisk", raw URLs, "hashtag", ...).
+function stripMarkdownForSpeech(text) {
+  return text
+    .replace(/\[([^\]]+)\]\((?:https?:\/\/|tel:|mailto:)[^\s)]+\)/g, "$1")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/^[-*]\s+/gm, "")
+    .replace(/^\d+\.\s+/gm, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function speak(text, lang, btn) {
+  if (!speechSupported) return;
+  if (speakingBtn === btn) {
+    window.speechSynthesis.cancel();
+    return;
+  }
+  window.speechSynthesis.cancel();
+  const utterance = new SpeechSynthesisUtterance(stripMarkdownForSpeech(text));
+  utterance.lang = lang;
+  const voice = pickVoice(lang);
+  if (voice) utterance.voice = voice;
+  utterance.onend = utterance.onerror = () => {
+    if (speakingBtn) speakingBtn.classList.remove("speaking");
+    speakingBtn = null;
+  };
+  speakingBtn = btn;
+  btn.classList.add("speaking");
+  window.speechSynthesis.speak(utterance);
+}
+
+function addSpeakButton(labelEl, text) {
+  if (!speechSupported) return;
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "speak-btn";
+  btn.title = "Listen to this answer";
+  btn.textContent = "🔊";
+  btn.addEventListener("click", () => speak(text, t().speechLang, btn));
+  labelEl.appendChild(btn);
+}
+
+function addBubble(role, text, { markdown = false, label = "", speakable = false } = {}) {
   const div = document.createElement("div");
   div.className = `msg ${role}`;
-  const labelHtml = label ? `<span class="msg-label">${escapeHtml(label)}</span>` : "";
+  let labelEl = null;
+  if (label) {
+    labelEl = document.createElement("span");
+    labelEl.className = "msg-label";
+    const labelText = document.createElement("span");
+    labelText.className = "msg-label-text";
+    labelText.textContent = label;
+    labelEl.appendChild(labelText);
+    div.appendChild(labelEl);
+  }
   if (markdown) {
-    div.innerHTML = labelHtml + renderMarkdown(text);
+    div.insertAdjacentHTML("beforeend", renderMarkdown(text));
   } else {
-    div.innerHTML = labelHtml;
     div.appendChild(document.createTextNode(text));
+  }
+  if (speakable && labelEl) {
+    addSpeakButton(labelEl, text);
   }
   messagesEl.appendChild(div);
   messagesEl.scrollTop = messagesEl.scrollHeight;
   return div;
+}
+
+// --- Follow-up suggestion chips shown under an assistant reply ---
+
+function addSuggestions(suggestions, humanChatOption) {
+  if (!suggestions || !suggestions.length) return;
+  const div = document.createElement("div");
+  div.className = "suggestions";
+  for (const suggestion of suggestions) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "suggestion-chip";
+    btn.textContent = suggestion;
+    if (humanChatOption && suggestion === humanChatOption) {
+      btn.addEventListener("click", () => {
+        div.remove();
+        requestHumanHandoff();
+      });
+    } else {
+      btn.addEventListener("click", () => {
+        div.remove();
+        sendMessage(suggestion);
+      });
+    }
+    div.appendChild(btn);
+  }
+  messagesEl.appendChild(div);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
 }
 
 async function getAssistantReply() {
@@ -244,11 +373,21 @@ async function getAssistantReply() {
     }
 
     const data = await res.json();
-    pending.innerHTML = `<span class="msg-label">${escapeHtml(t().aiLabel)}</span>` + renderMarkdown(data.content);
+    pending.innerHTML = "";
+    const labelEl = document.createElement("span");
+    labelEl.className = "msg-label";
+    const labelText = document.createElement("span");
+    labelText.className = "msg-label-text";
+    labelText.textContent = t().aiLabel;
+    labelEl.appendChild(labelText);
+    pending.appendChild(labelEl);
+    pending.insertAdjacentHTML("beforeend", renderMarkdown(data.content));
+    addSpeakButton(labelEl, data.content);
     pending.className = "msg assistant";
     history.push({ role: "assistant", content: data.content });
     sessionMessageCount += 2; // the server just appended one user + one assistant message
     upsertChatListEntry();
+    addSuggestions(data.suggestions, data.human_chat_option);
   } catch (err) {
     pending.textContent = t().chatError;
     pending.className = "msg assistant";
@@ -264,6 +403,22 @@ async function sendMessage(text) {
   if (!text.trim()) return;
   chipsEl.style.display = "none";
   addBubble("user", text);
+
+  if (humanHandoffActive) {
+    try {
+      const res = await fetch(`/api/sessions/${sessionId}/customer-message`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: text }),
+      });
+      const data = await res.json();
+      if (typeof data.message_count === "number") sessionMessageCount = data.message_count;
+    } catch (err) {
+      console.error(err);
+    }
+    return;
+  }
+
   history.push({ role: "user", content: text });
   await getAssistantReply();
 }
@@ -279,7 +434,22 @@ formEl.addEventListener("submit", (e) => {
   e.preventDefault();
   const text = inputEl.value;
   inputEl.value = "";
+  inputEl.style.height = "auto";
   sendMessage(text);
+});
+
+// Enter sends the message; Shift+Enter inserts a newline instead.
+inputEl.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault();
+    formEl.requestSubmit();
+  }
+});
+
+// Auto-grow the textarea as the user types multiple lines.
+inputEl.addEventListener("input", () => {
+  inputEl.style.height = "auto";
+  inputEl.style.height = `${inputEl.scrollHeight}px`;
 });
 
 chipsEl.addEventListener("click", (e) => {
@@ -330,6 +500,8 @@ if (SpeechRecognitionImpl) {
   recognition.addEventListener("result", (event) => {
     const transcript = event.results[0][0].transcript;
     inputEl.value = transcript;
+    inputEl.style.height = "auto";
+    inputEl.style.height = `${inputEl.scrollHeight}px`;
     inputEl.focus();
   });
 
@@ -357,18 +529,21 @@ if (SpeechRecognitionImpl) {
 
 // --- Talk to a real person ---
 
-humanBtn.addEventListener("click", async () => {
+async function requestHumanHandoff() {
   humanBtn.disabled = true;
   humanBtn.textContent = t().humanConnecting;
   try {
     await fetch(`/api/sessions/${sessionId}/request-human`, { method: "POST" });
     addBubble("system-note", t().humanNote);
+    humanHandoffActive = true;
   } catch (err) {
     console.error(err);
     humanBtn.disabled = false;
     humanBtn.textContent = t().humanBtn;
   }
-});
+}
+
+humanBtn.addEventListener("click", requestHumanHandoff);
 
 // --- Poll for messages a human support colleague sends from the dashboard ---
 
@@ -377,9 +552,19 @@ async function pollForHumanMessages() {
     const res = await fetch(`/api/sessions/${sessionId}/poll?after=${sessionMessageCount}`);
     if (!res.ok) return;
     const data = await res.json();
+
+    if (data.assigned_agent && data.assigned_agent !== lastKnownAgent) {
+      lastKnownAgent = data.assigned_agent;
+      addBubble("system-note", `${lastKnownAgent} ${t().agentJoinedSuffix}`);
+    }
+
     for (const msg of data.messages) {
       if (msg.role === "human") {
-        addBubble("human", msg.content, { markdown: true, label: t().supportLabel });
+        addBubble("human", msg.content, {
+          markdown: true,
+          label: msg.agent_name || t().supportLabel,
+          speakable: true,
+        });
       }
     }
     sessionMessageCount = data.next_after;
@@ -445,6 +630,7 @@ function resetChatView() {
   chipsEl.style.display = "";
   attachmentPreviewEl.hidden = true;
   inputEl.value = "";
+  inputEl.style.height = "auto";
   humanBtn.disabled = false;
   humanBtn.textContent = t().humanBtn;
 
@@ -452,8 +638,11 @@ function resetChatView() {
 }
 
 function startNewChat() {
+  if (speechSupported) window.speechSynthesis.cancel();
   history = [];
   sessionMessageCount = 0;
+  humanHandoffActive = false;
+  lastKnownAgent = null;
   sessionId = crypto.randomUUID();
   sessionStorage.setItem("ltn-session-id", sessionId);
   resetChatView();
@@ -467,6 +656,7 @@ function attachmentLabelFrom(content) {
 
 async function loadChat(id) {
   if (id === sessionId) return;
+  if (speechSupported) window.speechSynthesis.cancel();
   try {
     const res = await fetch(`/api/sessions/${id}`);
     if (!res.ok) return;
@@ -475,6 +665,8 @@ async function loadChat(id) {
     sessionId = id;
     sessionStorage.setItem("ltn-session-id", sessionId);
     sessionMessageCount = data.messages.length;
+    humanHandoffActive = Boolean(data.needs_human);
+    lastKnownAgent = data.assigned_agent || null;
     history = data.messages
       .filter((m) => m.role === "user" || m.role === "assistant")
       .map((m) => ({ role: m.role, content: m.content }));
@@ -488,9 +680,13 @@ async function loadChat(id) {
       } else if (msg.role === "user") {
         addBubble("user", msg.content);
       } else if (msg.role === "assistant") {
-        addBubble("assistant", msg.content, { markdown: true, label: t().aiLabel });
+        addBubble("assistant", msg.content, { markdown: true, label: t().aiLabel, speakable: true });
       } else if (msg.role === "human") {
-        addBubble("human", msg.content, { markdown: true, label: t().supportLabel });
+        addBubble("human", msg.content, {
+          markdown: true,
+          label: msg.agent_name || t().supportLabel,
+          speakable: true,
+        });
       }
     }
     renderChatList();

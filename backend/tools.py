@@ -1,10 +1,12 @@
+import re
 from pathlib import Path
 from urllib.parse import urljoin
 
 import requests
 from bs4 import BeautifulSoup
 
-from .knowledge import LF_PAGES
+from . import cs_client
+from .knowledge import LF_PAGES, MOCK_CUSTOMERS, SERVICE_PROVIDERS
 
 BROWSER_HEADERS = {
     "User-Agent": (
@@ -155,3 +157,151 @@ def fetch_lf_page(topic: str) -> str:
 
     _write_cache(topic, result)
     return result
+
+
+def find_service_provider(category: str, location: str) -> str:
+    """Look up the nearest partner that would actually carry out a claim
+    (e.g. the workshop that picks up and repairs a car), coordinated with
+    LF Bergslagen. Demo data: matches by town name, falling back to the
+    closest regional hub rather than inventing a provider."""
+    providers = SERVICE_PROVIDERS.get(category)
+    if not providers:
+        return f"Unknown service category '{category}'. Valid categories: {', '.join(SERVICE_PROVIDERS)}"
+
+    location_norm = (location or "").strip().lower()
+    match = next((p for p in providers if p["city"].lower() in location_norm or location_norm in p["city"].lower()), None)
+    provider = match or providers[0]
+    note = "" if match else (
+        f" No partner is listed in {location.strip()} itself, so this is the nearest one in the network:"
+    )
+
+    return (
+        f"Nearest LF Bergslagen partner for this claim:{note}\n"
+        f"- {provider['name']}\n"
+        f"- Address: {provider['address']}\n"
+        f"- Phone: {provider['phone']}\n"
+        f"- Hours: {provider['hours']}\n"
+        "This partner works directly with LF Bergslagen to carry out the claim "
+        "(e.g. pickup/delivery or repair is coordinated between them and LF Bergslagen)."
+    )
+
+
+
+def _digits_only(value: str) -> str:
+    return re.sub(r"\D", "", value or "")
+
+
+def _find_customer(customer_id: str) -> dict | None:
+    return next((c for c in MOCK_CUSTOMERS if c["customer_id"] == customer_id), None)
+
+
+def verify_customer_identity(name: str, personnummer: str, dob: str) -> str:
+    """Check a name + personnummer + date of birth against the mock
+    customer directory. Demo data only - never invent a match."""
+    name_norm = (name or "").strip().lower()
+    pnr_digits = _digits_only(personnummer)
+    dob_digits = _digits_only(dob)
+
+    for customer in MOCK_CUSTOMERS:
+        record_pnr_digits = _digits_only(customer["personnummer"])
+        record_dob_digits = _digits_only(customer["dob"])
+        name_matches = name_norm and name_norm in customer["name"].lower()
+        pnr_matches = pnr_digits and pnr_digits == record_pnr_digits
+        dob_matches = dob_digits and (
+            dob_digits == record_dob_digits or record_pnr_digits.startswith(dob_digits)
+        )
+        if name_matches and pnr_matches and dob_matches:
+            return f"VERIFIED\ncustomer_id: {customer['customer_id']}\nname: {customer['name']}"
+
+    return (
+        "NOT VERIFIED: no customer record matches that name, personnummer, and date of "
+        "birth together. Do not proceed - ask the user to double-check the details, or "
+        "offer to connect them with customer service instead."
+    )
+
+
+def get_recent_transactions(customer_id: str) -> str:
+    """List a verified customer's 10 most recent transactions, numbered so
+    the user can pick one by number."""
+    customer = _find_customer(customer_id)
+    if not customer:
+        return f"Unknown customer_id '{customer_id}'."
+    lines = [
+        f"{i + 1}. [{t['id']}] {t['date']} — {t['merchant']} — {t['amount']}"
+        for i, t in enumerate(customer["transactions"])
+    ]
+    return "Most recent transactions:\n" + "\n".join(lines)
+
+
+def get_customer_portfolio(customer_id: str) -> str:
+    """List a verified customer's current LF Bergslagen products."""
+    customer = _find_customer(customer_id)
+    if not customer:
+        return f"Unknown customer_id '{customer_id}'."
+    lines = "\n".join(f"- {p}" for p in customer["portfolio"])
+    return f"Current products for {customer['name']}:\n{lines}"
+
+
+def create_case(customer_id: str, case_type: str, transaction_id: str, description: str = "") -> str:
+    """Auto-create a fraud/dispute case in the Customer Service application
+    and return a real case ID - never invent one instead."""
+    customer = _find_customer(customer_id)
+    if not customer:
+        return f"Unknown customer_id '{customer_id}', cannot create case."
+    transaction = next((t for t in customer["transactions"] if t["id"] == transaction_id), None)
+    if not transaction:
+        return f"Unknown transaction_id '{transaction_id}' for this customer, cannot create case."
+
+    transaction_details = f"{transaction['date']} — {transaction['merchant']} — {transaction['amount']}"
+    case_id, status = cs_client.create_case_with_fallback(
+        case_type,
+        customer["name"],
+        customer_id,
+        description or f"{case_type.title()} report for transaction {transaction_id}",
+        {"transactionId": transaction_id, "transactionDetails": transaction_details},
+    )
+    return (
+        "Case created successfully.\n"
+        f"Case ID: {case_id}\n"
+        f"Type: {case_type}\n"
+        f"Transaction: {transaction_details}\n"
+        f"Status: {status}\n"
+        "A case handler will follow up within 1-2 business days."
+    )
+
+
+def request_callback(name: str, phone: str, preferred_time: str = "") -> str:
+    """Create a callback-request case in the Customer Service application so
+    a CS agent can pick it up and call the customer back."""
+    description = f"Customer requested a callback. Preferred time: {preferred_time or 'not specified'}."
+    case_id, status = cs_client.create_case_with_fallback(
+        "callback", name, None, description, {"phone": phone, "preferredTime": preferred_time}
+    )
+    return (
+        "Callback request created.\n"
+        f"Case ID: {case_id}\n"
+        f"Status: {status}\n"
+        "A customer service agent will call you back at the number you provided."
+    )
+
+
+def get_case_status(case_id: str) -> str:
+    """Look up an existing case's status in the Customer Service application
+    - e.g. an ongoing mortgage application, or an earlier fraud/dispute/
+    callback case. Never invent a status; only report what the tool finds."""
+    result = cs_client.get_case(case_id)
+    if result is None:
+        return "Could not reach the Customer Service application to check this case's status right now."
+    if result.get("not_found"):
+        return f"No case found with ID '{case_id}'. Double-check the case ID with the user."
+
+    extra_lines = "\n".join(f"{k}: {v}" for k, v in (result.get("extra") or {}).items())
+    return (
+        f"Case {result.get('id')}\n"
+        f"Type: {result.get('type')}\n"
+        f"Status: {result.get('status')}\n"
+        f"Description: {result.get('description')}\n"
+        f"Assigned agent: {result.get('assignedAgent') or 'Not yet assigned'}\n"
+        f"Last updated: {result.get('updatedAt') or result.get('createdAt')}"
+        + (f"\n{extra_lines}" if extra_lines else "")
+    )

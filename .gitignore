@@ -4,3 +4,13 @@ __pycache__/
 .venv/
 venv/
 *.log
+
+# Runtime-generated, not source
+backend/audit_log.jsonl
+
+# Local Java build tooling (downloaded, not part of the project)
+/tools/
+
+# Java build output
+cs-service/target/
+

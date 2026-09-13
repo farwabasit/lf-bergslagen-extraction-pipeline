@@ -14,16 +14,22 @@ class SessionStore:
 
     def get_or_create(self, session_id: str) -> dict:
         return self._sessions.setdefault(
-            session_id, {"messages": [], "needs_human": False}
+            session_id, {"messages": [], "needs_human": False, "assigned_agent": None}
         )
 
-    def add_message(self, session_id: str, role: str, content: str) -> int:
+    def add_message(self, session_id: str, role: str, content: str, agent_name: str | None = None) -> int:
         session = self.get_or_create(session_id)
-        session["messages"].append({"role": role, "content": content, "ts": self._now()})
+        message = {"role": role, "content": content, "ts": self._now()}
+        if agent_name:
+            message["agent_name"] = agent_name
+        session["messages"].append(message)
         return len(session["messages"])
 
     def request_human(self, session_id: str) -> None:
         self.get_or_create(session_id)["needs_human"] = True
+
+    def assign_agent(self, session_id: str, agent_name: str) -> None:
+        self.get_or_create(session_id)["assigned_agent"] = agent_name
 
     def messages_after(self, session_id: str, after: int) -> list[dict]:
         messages = self.get_or_create(session_id)["messages"]

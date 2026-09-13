@@ -1,14 +1,26 @@
 from pathlib import Path
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from . import audit, cs_client
 from .agent import run_agent
 from .sessions import sessions
 from .uploads import extract_text
 
 app = FastAPI(title="Life Transition Navigator")
+
+# Lets the separate Customer Service (Java) app poll a session's transcript
+# directly from its own browser page after picking up a chat hand-off - a
+# different origin/port, demo-permissive like the CS app's own CORS config.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["GET"],
+    allow_headers=["*"],
+)
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 
@@ -28,18 +40,27 @@ class ChatRequest(BaseModel):
 
 class HumanMessage(BaseModel):
     content: str
+    agent_name: str | None = None
+
+
+class CustomerMessage(BaseModel):
+    content: str
+
+
+class AssignAgent(BaseModel):
+    agent_name: str
 
 
 @app.post("/api/chat")
 def chat(req: ChatRequest) -> dict:
     history = [m.model_dump() for m in req.messages]
-    reply = run_agent(history, lang=req.lang)
+    reply, suggestions, extra = run_agent(history, lang=req.lang)
 
     if req.session_id and history:
         sessions.add_message(req.session_id, "user", history[-1]["content"])
         sessions.add_message(req.session_id, "assistant", reply)
 
-    return {"role": "assistant", "content": reply}
+    return {"role": "assistant", "content": reply, "suggestions": suggestions, **extra}
 
 
 @app.post("/api/upload")
@@ -54,14 +75,44 @@ async def upload(file: UploadFile = File(...)) -> dict:
 @app.post("/api/sessions/{session_id}/request-human")
 def request_human(session_id: str) -> dict:
     sessions.request_human(session_id)
-    return {"ok": True}
+
+    session = sessions.get(session_id) or {}
+    transcript = [
+        {"role": m["role"], "content": m["content"]}
+        for m in session.get("messages", [])
+        if m["role"] in ("user", "assistant", "human")
+    ]
+    first_user_msg = next((m["content"] for m in transcript if m["role"] == "user"), "")
+    customer_summary = first_user_msg[:80] if first_user_msg else "Customer chat"
+    notified = cs_client.notify_chat_request(session_id, customer_summary, transcript)
+
+    return {"ok": True, "cs_app_notified": notified}
 
 
 @app.get("/api/sessions/{session_id}/poll")
 def poll_session(session_id: str, after: int = 0) -> dict:
     new_messages = sessions.messages_after(session_id, after)
     total = after + len(new_messages)
-    return {"messages": new_messages, "next_after": total}
+    session = sessions.get(session_id) or {}
+    return {
+        "messages": new_messages,
+        "next_after": total,
+        "assigned_agent": session.get("assigned_agent"),
+    }
+
+
+@app.post("/api/sessions/{session_id}/customer-message")
+def send_customer_message(session_id: str, body: CustomerMessage) -> dict:
+    """Appends a customer message to a session that's already been handed
+    off to a human - does NOT invoke the AI agent, unlike /api/chat."""
+    count = sessions.add_message(session_id, "user", body.content)
+    return {"ok": True, "message_count": count}
+
+
+@app.post("/api/sessions/{session_id}/assign-agent")
+def assign_agent(session_id: str, body: AssignAgent) -> dict:
+    sessions.assign_agent(session_id, body.agent_name)
+    return {"ok": True}
 
 
 @app.get("/api/sessions")
@@ -79,8 +130,24 @@ def get_session(session_id: str) -> dict:
 
 @app.post("/api/sessions/{session_id}/human-message")
 def send_human_message(session_id: str, body: HumanMessage) -> dict:
-    count = sessions.add_message(session_id, "human", body.content)
+    count = sessions.add_message(session_id, "human", body.content, agent_name=body.agent_name)
     return {"ok": True, "message_count": count}
+
+
+@app.get("/api/audit/verify")
+def verify_audit_chain() -> dict:
+    """Recomputes the hash chain over the whole audit log and reports
+    whether it's intact - the check an auditor would run first."""
+    return audit.verify_chain()
+
+
+@app.get("/api/audit/{customer_id}")
+def get_audit_trail(customer_id: str) -> dict:
+    """Every logged agent decision for one customer_id, in order - the
+    underlying data behind any mortgage/credit/document decision made about
+    them. Demo-only: a real deployment would put real access control (only
+    auditors/compliance, not any caller) in front of this endpoint."""
+    return {"customer_id": customer_id, "events": audit.read_events(customer_id)}
 
 
 app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")

@@ -266,12 +266,6 @@ body {
 }
 
 .msg-label {
-  display: block;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-  color: var(--text-muted);
   margin-bottom: 4px;
 }
 
@@ -324,6 +318,67 @@ body {
   background: #eef3f8;
 }
 
+.suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-self: flex-start;
+  max-width: 80%;
+  margin-top: -4px;
+}
+
+.suggestion-chip {
+  background: white;
+  border: 1px solid var(--lf-blue);
+  color: var(--lf-blue);
+  border-radius: 999px;
+  padding: 5px 11px;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.suggestion-chip:hover {
+  background: #eef3f8;
+}
+
+.msg-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.msg-label-text {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.msg.human .msg-label-text {
+  color: var(--lf-green);
+}
+
+.speak-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--text-muted);
+  opacity: 0.75;
+}
+
+.speak-btn:hover {
+  opacity: 1;
+}
+
+.speak-btn.speaking {
+  color: var(--lf-red);
+  opacity: 1;
+}
+
 .composer {
   display: flex;
   gap: 8px;
@@ -331,15 +386,19 @@ body {
   border-top: 1px solid var(--border);
 }
 
-.composer input {
+.composer textarea {
   flex: 1;
   padding: 12px 14px;
   border-radius: 10px;
   border: 1px solid var(--border);
   font-size: 14.5px;
+  font-family: inherit;
+  resize: none;
+  max-height: 140px;
+  line-height: 1.4;
 }
 
-.composer input:focus {
+.composer textarea:focus {
   outline: 2px solid var(--lf-blue);
 }
 
