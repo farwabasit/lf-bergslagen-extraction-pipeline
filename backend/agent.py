@@ -2,16 +2,21 @@ import json
 import re
 
 from . import config
+from .agents.fraud_dispute_agent import (
+    fraud_dispute_flow_resolved,
+    run_fraud_dispute_agent,
+    wants_fraud_or_dispute,
+)
 from .agents.mortgage_agent import mortgage_flow_resolved, run_mortgage_agent, wants_mortgage_application
 from .knowledge import LF_PAGES, SERVICE_PROVIDERS
+from .link_safety import URL_RE, strip_unverified_links as _strip_unverified_links
 from .llm_client import client
+from .suggestions import generate_suggestions
 from .tools import (
-    create_case,
     fetch_lf_page,
     find_service_provider,
     get_case_status,
     get_customer_portfolio,
-    get_recent_transactions,
     request_callback,
     verify_customer_identity,
 )
@@ -152,48 +157,24 @@ Don't dump all nine on someone who's only just started looking — apply the ORD
 PRIORITY rule above: cover what's actually relevant and next for their stage, mention the
 rest as things to come back to later rather than silently leaving them out entirely.
 
-IDENTITY VERIFICATION FLOW: this applies to three specific requests — reporting fraud,
-disputing a transaction, and asking about their existing product portfolio. These all
-touch a real customer's account, so never skip verification and never guess or assume an
-identity from earlier in the conversation.
-1. As soon as the user's intent is one of the three above, ask for their full name,
-   personnummer, and date of birth together in one message, explaining briefly that this
-   is needed to verify their identity before you can look at their account. Don't proceed
-   without all three.
+PORTFOLIO IDENTITY FLOW: when the user asks about their existing product portfolio, this
+touches a real customer's account, so never skip verification and never guess or assume an
+identity from earlier in the conversation. (Reporting fraud or disputing a transaction is
+handled by a separate specialist flow before your turn even starts — you won't see those
+requests.)
+1. Ask for their full name, personnummer, and date of birth together in one message,
+   explaining briefly that this is needed to verify their identity before you can look at
+   their account. Don't proceed without all three.
 2. Once you have all three, call verify_customer_identity with exactly what they gave you.
    Trust only what it returns — never say "verified" unless the tool result says VERIFIED,
    and never invent a customer_id.
 3. If it returns NOT VERIFIED, say so plainly, ask them to double-check the details (a
    typo in the personnummer is the most common cause), and offer to connect them with
    customer service as a fallback — don't retry silently or guess at a fix.
-4. If it returns VERIFIED and the request was to report fraud or dispute a transaction,
-   call get_recent_transactions with the returned customer_id. Your reply this turn MUST
-   contain the full numbered list of transactions it returned, copied over as-is (date,
-   merchant, amount for every entry) — never reply with just "which one?" or a summary
-   without the actual list; the user cannot pick from a list they can't see. Ask them
-   which numbered transaction they mean right after showing the list, in the same reply.
-5. If it returns VERIFIED and the request was about their product portfolio, call
-   get_customer_portfolio with the customer_id and report exactly what it returns — don't
-   invent or guess at products that aren't in the result.
-6. Once the user picks a transaction, call create_case with the customer_id, case_type
-   ("fraud" or "dispute" matching what they originally asked for), the transaction_id from
-   the numbered list in step 4, and a short description in the user's own words of what
-   happened. Never invent a case ID — only ever state the one the tool result gives you.
-7. Close by clearly restating the case ID, the transaction it's about, and that a case
-   handler will follow up — this is the concrete next step for this conversation.
-
-IMPORTANT about state: a tool result (like the customer_id from verify_customer_identity)
-is only visible to you within the SAME reply you called it in — it is NOT remembered on
-later turns, only the visible conversation text is. Concretely: by the time the user has
-picked a transaction and it's time to call create_case, that is almost always a LATER turn
-than the one where you called verify_customer_identity, so you will NOT have a real
-customer_id available. Rule: before every single create_case call, first call
-verify_customer_identity again in that same turn, using the name/personnummer/date of
-birth the user gave earlier in the conversation, and use the customer_id it JUST returned.
-Do this even if you're fairly sure you remember the customer_id from earlier — you don't
-have it anymore, only the conversation text does. Never type a customer_id from memory,
-pattern-match one that "looks right", or invent one — every create_case call must be
-preceded by its own fresh verify_customer_identity call in the same turn.
+4. If it returns VERIFIED, call get_customer_portfolio with the customer_id and report
+   exactly what it returns — don't invent or guess at products that aren't in the result.
+   Remember tool results aren't kept between turns - if you need the customer_id again on
+   a later turn, call verify_customer_identity again first, don't reuse or guess one.
 
 CALLBACK REQUEST FLOW: when the user wants a customer service agent to call them back,
 this does NOT need the identity verification flow above — it's a simple request, not an
@@ -322,24 +303,6 @@ TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "get_recent_transactions",
-            "description": (
-                "List a verified customer's 10 most recent transactions, numbered, so "
-                "they can pick one to report as fraud or dispute. Only call this after "
-                "verify_customer_identity has returned VERIFIED."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "customer_id": {"type": "string", "description": "The customer_id returned by verify_customer_identity."},
-                },
-                "required": ["customer_id"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
             "name": "get_customer_portfolio",
             "description": (
                 "List a verified customer's current LF Bergslagen products. Only call "
@@ -351,38 +314,6 @@ TOOLS = [
                     "customer_id": {"type": "string", "description": "The customer_id returned by verify_customer_identity."},
                 },
                 "required": ["customer_id"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "create_case",
-            "description": (
-                "Auto-create a fraud or dispute case in the customer service application "
-                "for one specific transaction, and return a real case ID. Only call this "
-                "after the verified customer has picked a transaction from "
-                "get_recent_transactions."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "customer_id": {"type": "string", "description": "The customer_id returned by verify_customer_identity."},
-                    "case_type": {
-                        "type": "string",
-                        "enum": ["fraud", "dispute"],
-                        "description": "Whether this is a fraud report or a transaction dispute.",
-                    },
-                    "transaction_id": {
-                        "type": "string",
-                        "description": "The transaction's id from the get_recent_transactions list.",
-                    },
-                    "description": {
-                        "type": "string",
-                        "description": "A short description of what happened, in the customer's own words.",
-                    },
-                },
-                "required": ["customer_id", "case_type", "transaction_id"],
             },
         },
     },
@@ -425,25 +356,6 @@ TOOLS = [
         },
     },
 ]
-
-
-MARKDOWN_LINK_RE = re.compile(
-    r"\[([^\]]+)\]\((https?://[^\s)\]]+|tel:[^\s)\]]+|mailto:[^\s)\]]+)\)"
-)
-URL_RE = re.compile(r"https?://[^\s)\]]+|tel:[+\d][^\s)\]]*|mailto:[^\s)\]]+")
-
-
-def _strip_unverified_links(reply: str, seen_urls: set[str]) -> str:
-    """The model is instructed to only link to URLs it actually fetched, but
-    that's not guaranteed - so verify here and degrade any link the agent
-    didn't actually see to plain text rather than risk a fabricated URL
-    reaching the user."""
-
-    def replace(match: re.Match) -> str:
-        label, url = match.group(1), match.group(2)
-        return match.group(0) if url in seen_urls else label
-
-    return MARKDOWN_LINK_RE.sub(replace, reply)
 
 
 LANGUAGE_NAMES = {"en": "English", "sv": "Swedish"}
@@ -558,27 +470,19 @@ def contact_menu_response(lang: str | None) -> tuple[str, list[str], dict]:
     return CONTACT_MENU_TEXT[key], suggestions, {"human_chat_option": CONTACT_MENU_CHAT_LABEL[key]}
 
 
-# Same nudge pattern again: reporting fraud, disputing a transaction, and
-# asking about a product portfolio all require identity verification first
-# (see IDENTITY VERIFICATION FLOW in the system prompt) - remind the model
-# every turn until a case/portfolio result shows the flow actually finished,
-# since this is the kind of thing that shouldn't be left to chance.
+# Same nudge pattern again: asking about a product portfolio requires
+# identity verification first (see PORTFOLIO IDENTITY FLOW in the system
+# prompt) - remind the model every turn until a result shows the flow
+# actually finished. (Fraud/dispute used to live here too, but that's now
+# its own deterministic flow - see fraud_dispute_agent.py.)
 IDENTITY_FLOW_KEYWORDS = {
-    "fraud": [
-        "report fraud", "reporting fraud", "i want to report fraud", "it's fraud",
-        "anmäla bedrägeri", "anmäl bedrägeri", "jag vill anmäla ett bedrägeri", "bedrägeri",
-    ],
-    "dispute": [
-        "dispute a transaction", "dispute transaction", "i want to dispute",
-        "bestrida en transaktion", "bestrid en transaktion", "bestrida transaktion",
-    ],
     "portfolio": [
         "product portfolio", "existing products", "current products",
         "my products with länsförsäkringar", "see my current products",
         "nuvarande produkter", "min försäkringsportfölj", "mina produkter hos länsförsäkringar",
     ],
 }
-IDENTITY_FLOW_RESOLVED_MARKERS = ("Case ID:", "Current products for")
+IDENTITY_FLOW_RESOLVED_MARKERS = ("Current products for",)
 
 
 def _detect_identity_flow(history: list[dict]) -> str | None:
@@ -632,34 +536,6 @@ def _wants_case_status(history: list[dict]) -> bool:
     return any(kw in text for kw in CASE_STATUS_KEYWORDS)
 
 
-SUGGESTIONS_JSON_RE = re.compile(r"\[.*\]", re.DOTALL)
-
-
-def generate_suggestions(reply: str) -> list[str]:
-    """Ask the model for a few short follow-up messages the user could tap
-    instead of typing, so every answer also comes with quick next options."""
-    prompt = (
-        "Based only on the assistant reply below, suggest exactly 3 short "
-        "follow-up messages (max 6 words each) that the USER might naturally "
-        "send next to keep this conversation going. Write them in the same "
-        "language as the reply, from the user's point of view (e.g. a question "
-        "or request they'd make, not advice). Return ONLY a JSON array of 3 "
-        "strings, nothing else - no markdown, no explanation.\n\n"
-        f"Assistant reply:\n{reply}"
-    )
-    try:
-        response = client.chat.completions.create(
-            model=config.OPENROUTER_MODEL,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.5,
-            max_tokens=150,
-        )
-        content = response.choices[0].message.content or "[]"
-        match = SUGGESTIONS_JSON_RE.search(content)
-        data = json.loads(match.group(0) if match else content)
-        return [str(item).strip() for item in data if str(item).strip()][:3]
-    except Exception:
-        return []
 
 
 def run_agent(history: list[dict], lang: str | None = None) -> tuple[str, list[str], dict]:
@@ -669,6 +545,10 @@ def run_agent(history: list[dict], lang: str | None = None) -> tuple[str, list[s
 
     if wants_mortgage_application(history) and not mortgage_flow_resolved(history):
         return run_mortgage_agent(history, lang)
+
+    fraud_or_dispute = wants_fraud_or_dispute(history)
+    if fraud_or_dispute and not fraud_dispute_flow_resolved(history):
+        return run_fraud_dispute_agent(history, lang, fraud_or_dispute)
 
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
     if lang in LANGUAGE_NAMES:
@@ -729,21 +609,15 @@ def run_agent(history: list[dict], lang: str | None = None) -> tuple[str, list[s
             {
                 "role": "system",
                 "content": (
-                    f"This is a '{identity_flow}' request - follow the IDENTITY VERIFICATION "
-                    "FLOW in your instructions exactly. Collect full name, personnummer, and "
-                    "date of birth if you don't have all three yet (ask for all three "
-                    "together, don't proceed without them). Once you have all three, call "
+                    "This is a portfolio request - follow the PORTFOLIO IDENTITY FLOW in "
+                    "your instructions exactly. Collect full name, personnummer, and date of "
+                    "birth if you don't have all three yet (ask for all three together, "
+                    "don't proceed without them). Once you have all three, call "
                     "verify_customer_identity and trust only what it returns - never assume "
-                    "verified. If verified and this is fraud/dispute, call "
-                    "get_recent_transactions and your reply MUST show the full numbered list "
-                    "it returned (not just ask which one) before the user can pick one and "
-                    "you call create_case. If verified and this is about their "
-                    "portfolio, call get_customer_portfolio and report exactly what it "
-                    "returns. Remember tool results aren't kept between turns - if the user "
-                    "has now picked a transaction, ALWAYS call verify_customer_identity again "
-                    "in this same turn (using the details given earlier) right before calling "
-                    "create_case, and use the customer_id it just returned - never reuse or "
-                    "guess a customer_id from earlier in the conversation."
+                    "verified. If verified, call get_customer_portfolio and report exactly "
+                    "what it returns. Remember tool results aren't kept between turns - if "
+                    "you need the customer_id again on a later turn, call "
+                    "verify_customer_identity again, never reuse or guess one."
                 ),
             }
         )
@@ -827,7 +701,10 @@ def run_agent(history: list[dict], lang: str | None = None) -> tuple[str, list[s
 
         if not tool_calls:
             reply = _strip_unverified_links(choice.content or "", seen_urls)
-            return reply, generate_suggestions(reply), {}
+            last_user_message = next(
+                (m.get("content", "") for m in reversed(history) if m.get("role") == "user"), ""
+            )
+            return reply, generate_suggestions(last_user_message, reply), {}
 
         for call in tool_calls:
             try:
@@ -844,17 +721,8 @@ def run_agent(history: list[dict], lang: str | None = None) -> tuple[str, list[s
                 result = verify_customer_identity(
                     args.get("name", ""), args.get("personnummer", ""), args.get("dob", "")
                 )
-            elif name == "get_recent_transactions":
-                result = get_recent_transactions(args.get("customer_id", ""))
             elif name == "get_customer_portfolio":
                 result = get_customer_portfolio(args.get("customer_id", ""))
-            elif name == "create_case":
-                result = create_case(
-                    args.get("customer_id", ""),
-                    args.get("case_type", ""),
-                    args.get("transaction_id", ""),
-                    args.get("description", ""),
-                )
             elif name == "request_callback":
                 result = request_callback(
                     args.get("name", ""), args.get("phone", ""), args.get("preferred_time", "")
@@ -869,9 +737,12 @@ def run_agent(history: list[dict], lang: str | None = None) -> tuple[str, list[s
                     # The page's own URL is real and was just fetched, but
                     # _extract_links deliberately excludes self-links (to filter
                     # out region-switcher noise), so it never appears inside the
-                    # tool result text itself - add it explicitly or a correct
-                    # reference to the page just fetched gets wrongly stripped.
+                    # tool result text itself - add it to the verified set AND
+                    # spell it out in the text the model actually sees, or the
+                    # model has no real string to copy and either omits a
+                    # reference to the page it just read or guesses at one.
                     seen_urls.add(LF_PAGES[topic])
+                    result += f"\n\n(This page's own URL: {LF_PAGES[topic]})"
 
             messages.append(
                 {"role": "tool", "tool_call_id": call.id, "content": result}

@@ -356,6 +356,99 @@ function addSuggestions(suggestions, humanChatOption) {
   messagesEl.scrollTop = messagesEl.scrollHeight;
 }
 
+// --- Inline structured form (e.g. fraud/dispute follow-up questions) ---
+//
+// The backend can't reliably free-parse an answer to "suspected place of
+// fraud / block card? / block account?" from open text, so instead of
+// asking those as chat questions, it sends a form schema and expects the
+// answer back as one specific composed message it can regex-parse. The
+// field->phrase mapping here has to match backend/agents/fraud_dispute_agent.py's
+// FORM_ANSWER_RE exactly, or the backend won't recognize the answer.
+const FORM_FIELD_ANSWER_PREFIX = {
+  place: "Suspected place of fraud",
+  block_card: "Block debit card",
+  block_account: "Block debits on account",
+  full_name: "Full name",
+  personnummer: "Personnummer",
+  dob: "Date of birth",
+};
+
+function addForm(form) {
+  if (!form || !form.fields || !form.fields.length) return;
+
+  const wrapper = document.createElement("form");
+  wrapper.className = "inline-form";
+
+  const values = {};
+  for (const field of form.fields) {
+    const fieldEl = document.createElement("div");
+    fieldEl.className = "inline-form-field";
+
+    const label = document.createElement("label");
+    label.textContent = field.label;
+    fieldEl.appendChild(label);
+
+    if (field.type === "yesno") {
+      const group = document.createElement("div");
+      group.className = "inline-form-yesno";
+      for (const option of ["Yes", "No"]) {
+        const optId = `${field.name}-${option}`;
+        const radioLabel = document.createElement("label");
+        radioLabel.className = "inline-form-radio";
+        const radio = document.createElement("input");
+        radio.type = "radio";
+        radio.name = field.name;
+        radio.value = option;
+        radio.id = optId;
+        radio.addEventListener("change", () => {
+          values[field.name] = option;
+        });
+        radioLabel.appendChild(radio);
+        radioLabel.append(` ${option}`);
+        group.appendChild(radioLabel);
+      }
+      fieldEl.appendChild(group);
+    } else {
+      const input = document.createElement("input");
+      input.type = "text";
+      input.required = true;
+      if (field.placeholder) input.placeholder = field.placeholder;
+      input.addEventListener("input", () => {
+        values[field.name] = input.value;
+      });
+      fieldEl.appendChild(input);
+    }
+
+    wrapper.appendChild(fieldEl);
+  }
+
+  const errorEl = document.createElement("p");
+  errorEl.className = "inline-form-error";
+  wrapper.appendChild(errorEl);
+
+  const submitBtn = document.createElement("button");
+  submitBtn.type = "submit";
+  submitBtn.textContent = "Submit";
+  wrapper.appendChild(submitBtn);
+
+  wrapper.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const missing = form.fields.filter((f) => !values[f.name]);
+    if (missing.length) {
+      errorEl.textContent = "Please fill in all fields before submitting.";
+      return;
+    }
+    const composed = form.fields
+      .map((f) => `${FORM_FIELD_ANSWER_PREFIX[f.name] || f.label}: ${values[f.name]}`)
+      .join("\n");
+    wrapper.remove();
+    sendMessage(composed);
+  });
+
+  messagesEl.appendChild(wrapper);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
 async function getAssistantReply() {
   const pending = addBubble("assistant pending", t().thinking, { label: t().aiLabel });
   inputEl.disabled = true;
@@ -388,6 +481,7 @@ async function getAssistantReply() {
     sessionMessageCount += 2; // the server just appended one user + one assistant message
     upsertChatListEntry();
     addSuggestions(data.suggestions, data.human_chat_option);
+    addForm(data.form);
   } catch (err) {
     pending.textContent = t().chatError;
     pending.className = "msg assistant";

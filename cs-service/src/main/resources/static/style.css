@@ -112,10 +112,19 @@ body {
 }
 
 .role-gate-card p {
-  margin: 0;
+  margin: 0 0 16px;
   font-size: 13.5px;
   color: var(--text-muted);
   line-height: 1.5;
+}
+
+.role-gate-card select {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  font-size: 14px;
+  color: var(--text-main);
 }
 
 .role-badge {

@@ -220,19 +220,6 @@ def verify_customer_identity(name: str, personnummer: str, dob: str) -> str:
     )
 
 
-def get_recent_transactions(customer_id: str) -> str:
-    """List a verified customer's 10 most recent transactions, numbered so
-    the user can pick one by number."""
-    customer = _find_customer(customer_id)
-    if not customer:
-        return f"Unknown customer_id '{customer_id}'."
-    lines = [
-        f"{i + 1}. [{t['id']}] {t['date']} — {t['merchant']} — {t['amount']}"
-        for i, t in enumerate(customer["transactions"])
-    ]
-    return "Most recent transactions:\n" + "\n".join(lines)
-
-
 def get_customer_portfolio(customer_id: str) -> str:
     """List a verified customer's current LF Bergslagen products."""
     customer = _find_customer(customer_id)
@@ -240,34 +227,6 @@ def get_customer_portfolio(customer_id: str) -> str:
         return f"Unknown customer_id '{customer_id}'."
     lines = "\n".join(f"- {p}" for p in customer["portfolio"])
     return f"Current products for {customer['name']}:\n{lines}"
-
-
-def create_case(customer_id: str, case_type: str, transaction_id: str, description: str = "") -> str:
-    """Auto-create a fraud/dispute case in the Customer Service application
-    and return a real case ID - never invent one instead."""
-    customer = _find_customer(customer_id)
-    if not customer:
-        return f"Unknown customer_id '{customer_id}', cannot create case."
-    transaction = next((t for t in customer["transactions"] if t["id"] == transaction_id), None)
-    if not transaction:
-        return f"Unknown transaction_id '{transaction_id}' for this customer, cannot create case."
-
-    transaction_details = f"{transaction['date']} — {transaction['merchant']} — {transaction['amount']}"
-    case_id, status = cs_client.create_case_with_fallback(
-        case_type,
-        customer["name"],
-        customer_id,
-        description or f"{case_type.title()} report for transaction {transaction_id}",
-        {"transactionId": transaction_id, "transactionDetails": transaction_details},
-    )
-    return (
-        "Case created successfully.\n"
-        f"Case ID: {case_id}\n"
-        f"Type: {case_type}\n"
-        f"Transaction: {transaction_details}\n"
-        f"Status: {status}\n"
-        "A case handler will follow up within 1-2 business days."
-    )
 
 
 def request_callback(name: str, phone: str, preferred_time: str = "") -> str:

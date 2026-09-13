@@ -17,9 +17,11 @@ import json
 import re
 
 from .. import audit, config, cs_client
-from ..knowledge import MOCK_CUSTOMERS
+from ..knowledge import LF_PAGES, MOCK_CUSTOMERS
+from ..link_safety import URL_RE, strip_unverified_links
 from ..llm_client import client
-from ..tools import verify_customer_identity
+from ..suggestions import generate_suggestions
+from ..tools import fetch_lf_page, verify_customer_identity
 from . import credit_agent, document_agent, loan_calc
 
 MAX_TOOL_ROUNDS = 8
@@ -45,10 +47,51 @@ MORTGAGE_RESOLVED_MARKERS = (
 
 ATTACHMENT_RE = re.compile(r"^\[Attached document:\s*(.+?)\]\n\n(.*)$", re.DOTALL)
 
+# The identity ask used to be free-form LLM text, paired with LLM-generated
+# suggestion chips like "My full name is..." - which looked like real
+# options but were templates the customer needed to complete. Clicking one
+# sent it verbatim, which obviously never verifies, and the chips vanished
+# after one click so the other two fields couldn't be given at all. A form
+# with real input fields is the honest version: fill in your own values,
+# submit once. Bypassing the LLM for this one specific step also makes it
+# deterministic - same reliability reasoning as the rest of this module.
+IDENTITY_FORM = {
+    "type": "identity_details",
+    "fields": [
+        {"name": "full_name", "label": "Full name", "type": "text", "placeholder": "e.g. Anna Andersson"},
+        {"name": "personnummer", "label": "Personnummer", "type": "text", "placeholder": "YYYYMMDD-XXXX"},
+        {"name": "dob", "label": "Date of birth", "type": "text", "placeholder": "YYYY-MM-DD"},
+    ],
+}
+ASK_IDENTITY_TEXT = {
+    "en": (
+        "I'm the mortgage specialist Sara connected you with. To start your mortgage "
+        "application, I need to verify your identity - please fill in your details below."
+    ),
+    "sv": (
+        "Jag är bolånespecialisten som Sara kopplade dig till. För att starta din "
+        "bolåneansökan behöver jag verifiera din identitet - fyll i dina uppgifter nedan."
+    ),
+}
+
 
 def wants_mortgage_application(history: list[dict]) -> bool:
     combined = " ".join(m.get("content", "") for m in history if m.get("role") == "user").lower()
     return any(kw in combined for kw in MORTGAGE_KEYWORDS)
+
+
+INDICATION_KEYWORDS = [
+    "indication", "loan offer", "an offer", "get an estimate", "rough estimate",
+    "how much can i borrow", "what would i pay", "what would my rate",
+    "indikation", "erbjudande", "en uppskattning", "hur mycket kan jag låna",
+    "vad skulle jag betala",
+]
+
+
+def _wants_loan_indication(history: list[dict]) -> bool:
+    last_user = next((m.get("content", "") for m in reversed(history) if m.get("role") == "user"), "")
+    text = last_user.lower()
+    return any(kw in text for kw in INDICATION_KEYWORDS)
 
 
 def mortgage_flow_resolved(history: list[dict]) -> bool:
@@ -84,6 +127,11 @@ THE PROCESS, IN ORDER - do not skip or reorder steps:
    explaining it's needed to verify their identity and pull up their
    account. Don't proceed without it.
 
+LINKS: whenever you cite a URL, always use markdown link syntax
+[label](url) - never write a bare URL. Only ever use a URL that appeared in
+a fetch_lf_page tool result; never invent, guess, or recall one from
+general knowledge, even if it looks plausible.
+
 2. DOCUMENTS: once you have identity info, ask the customer to attach three
    documents to the chat: the purchase agreement (köpekontrakt), an income
    statement or payslip, and a summary of their monthly expenses. Mention,
@@ -95,6 +143,19 @@ THE PROCESS, IN ORDER - do not skip or reorder steps:
    it's attached, don't ask them to "confirm" the price separately.
    Don't call any tool yet if fewer than 3 documents are attached - just ask
    for whichever ones are still missing, nothing else.
+
+   LOAN INDICATION / OFFER, BEFORE DOCUMENTS ARE READY: whenever the customer
+   asks for a loan indication, an offer, an estimate, or "what would I pay" -
+   at any point before all 3 documents are in - do two things in the same
+   reply: (a) call fetch_lf_page("home_loan") and share it as the mortgage
+   calculator/info link, framed as "you can get a rough estimate yourself
+   here: [Räkna på bolån](<the exact URL of the page you just fetched>)" -
+   that page's own URL (the one you called fetch_lf_page with, not a link
+   found inside its text) IS the correct one to cite here, since that's
+   LF Bergslagen's real mortgage/loan page; (b) explain plainly that to get
+   an actual indication/offer worked out here in the chat, you need the
+   three documents above, and ask for whichever are still missing. Never
+   invent or guess at a different URL - only the fetched page's own URL.
 
 3. As soon as identity info AND at least 3 attached documents are present,
    proceed immediately - do NOT ask about purchase price or loan amount
@@ -158,6 +219,24 @@ RULES THROUGHOUT:
 """
 
 TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "fetch_lf_page",
+            "description": (
+                "Fetch a specific LF Bergslagen web page to ground advice in real, current "
+                "information - e.g. \"home_loan\" for the mortgage calculator and general "
+                "mortgage info page."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "topic": {"type": "string", "enum": list(LF_PAGES.keys())},
+                },
+                "required": ["topic"],
+            },
+        },
+    },
     {
         "type": "function",
         "function": {
@@ -278,31 +357,6 @@ TOOLS = [
     },
 ]
 
-SUGGESTIONS_JSON_RE = re.compile(r"\[.*\]", re.DOTALL)
-
-
-def _generate_suggestions(reply: str) -> list[str]:
-    prompt = (
-        "Based only on the assistant reply below, suggest exactly 3 short "
-        "follow-up messages (max 6 words each) the USER might send next. "
-        "Same language as the reply. Return ONLY a JSON array of 3 strings.\n\n"
-        f"Assistant reply:\n{reply}"
-    )
-    try:
-        response = client.chat.completions.create(
-            model=config.OPENROUTER_MODEL,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.5,
-            max_tokens=150,
-        )
-        content = response.choices[0].message.content or "[]"
-        match = SUGGESTIONS_JSON_RE.search(content)
-        data = json.loads(match.group(0) if match else content)
-        return [str(item).strip() for item in data if str(item).strip()][:3]
-    except Exception:
-        return []
-
-
 def _find_customer(customer_id: str) -> dict | None:
     return next((c for c in MOCK_CUSTOMERS if c["customer_id"] == customer_id), None)
 
@@ -362,15 +416,20 @@ def _build_case_extra(
 
 
 def run_mortgage_agent(history: list[dict], lang: str | None = None) -> tuple[str, list[str], dict]:
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-    messages.extend(history)
-
-    documents_attached = len(_extract_attached_documents(history))
     has_identity_hint = bool(re.search(r"\d{6,8}[-\s]?\d{4}", " ".join(
         m.get("content", "") for m in history if m.get("role") == "user"
     )))
 
-    if has_identity_hint and documents_attached >= 3:
+    if not has_identity_hint:
+        key = "sv" if lang == "sv" else "en"
+        return ASK_IDENTITY_TEXT[key], [], {"form": IDENTITY_FORM}
+
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    messages.extend(history)
+
+    documents_attached = len(_extract_attached_documents(history))
+
+    if documents_attached >= 3:
         messages.append({
             "role": "system",
             "content": (
@@ -386,21 +445,25 @@ def run_mortgage_agent(history: list[dict], lang: str | None = None) -> tuple[st
             ),
         })
     else:
-        missing = []
-        if not has_identity_hint:
-            missing.append("identity details (name, personnummer, date of birth)")
-        if documents_attached < 3:
-            missing.append(f"attached documents ({documents_attached}/3 so far)")
-        messages.append({
-            "role": "system",
-            "content": (
-                f"Still missing: {', '.join(missing)}. Ask for whatever's missing - do not "
-                "call extract_mortgage_documents, run_credit_assessment, or any later tool yet."
-            ),
-        })
+        # Identity is already confirmed present (handled above, before the
+        # LLM is even called) - only documents can still be missing here.
+        reminder = (
+            f"Still missing: attached documents ({documents_attached}/3 so far). Ask for "
+            "whichever are still missing - do not call extract_mortgage_documents, "
+            "run_credit_assessment, or any later tool yet."
+        )
+        if _wants_loan_indication(history):
+            reminder += (
+                " The customer is asking for a loan indication/offer/estimate - in THIS reply, "
+                "call fetch_lf_page(\"home_loan\") and share the real calculator link from its "
+                "results, AND explain that an actual indication/offer here in chat needs the "
+                "documents above."
+            )
+        messages.append({"role": "system", "content": reminder})
 
     last_extraction: dict | None = None
     last_credit_assessment: dict | None = None
+    seen_urls: set[str] = set()
 
     for round_index in range(MAX_TOOL_ROUNDS):
         response = client.chat.completions.create(
@@ -426,8 +489,11 @@ def run_mortgage_agent(history: list[dict], lang: str | None = None) -> tuple[st
         messages.append(assistant_msg)
 
         if not tool_calls:
-            reply = choice.content or ""
-            return reply, _generate_suggestions(reply), {}
+            reply = strip_unverified_links(choice.content or "", seen_urls)
+            last_user_message = next(
+                (m.get("content", "") for m in reversed(history) if m.get("role") == "user"), ""
+            )
+            return reply, generate_suggestions(last_user_message, reply), {}
 
         for call in tool_calls:
             try:
@@ -436,7 +502,19 @@ def run_mortgage_agent(history: list[dict], lang: str | None = None) -> tuple[st
                 args = {}
 
             name = call.function.name
-            if name == "verify_customer_identity":
+            if name == "fetch_lf_page":
+                topic = args.get("topic", "")
+                result = fetch_lf_page(topic)
+                seen_urls.update(URL_RE.findall(result))
+                if topic in LF_PAGES:
+                    # The page's own URL never appears inside the fetched
+                    # text itself (self-links are filtered out) - add it to
+                    # the verified set AND spell it out in the text so the
+                    # model has a real string to copy, not just an entry on
+                    # an allowlist it can't see.
+                    seen_urls.add(LF_PAGES[topic])
+                    result += f"\n\n(This page's own URL: {LF_PAGES[topic]})"
+            elif name == "verify_customer_identity":
                 result = verify_customer_identity(
                     args.get("name", ""), args.get("personnummer", ""), args.get("dob", "")
                 )

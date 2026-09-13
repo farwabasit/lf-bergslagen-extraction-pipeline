@@ -23,7 +23,7 @@
         <option value="ADVISOR">Advisor</option>
         <option value="OPERATIONS">Operations</option>
       </select>
-      <label for="agent-name">Agent name</label>
+      <label for="agent-name" id="agent-name-label">Agent name</label>
       <input id="agent-name" type="text" placeholder="e.g. Björn" />
     </div>
   </header>
@@ -39,6 +39,12 @@
       <p>What you can see and do here depends on your role - a Customer Service
       Rep handles live chats, an Advisor works cases routed for review, and
       Operations handles approved fulfilment tasks.</p>
+      <select id="role-gate-select">
+        <option value="">Select role...</option>
+        <option value="CS_REP">Customer Service Rep</option>
+        <option value="ADVISOR">Advisor</option>
+        <option value="OPERATIONS">Operations</option>
+      </select>
     </div>
   </div>
 

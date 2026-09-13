@@ -5,6 +5,7 @@
 const PYTHON_APP_BASE = "http://localhost:8000";
 
 const agentNameEl = document.getElementById("agent-name");
+const agentNameLabelEl = document.getElementById("agent-name-label");
 agentNameEl.value = localStorage.getItem("cs-agent-name") || "";
 agentNameEl.addEventListener("input", () => {
   localStorage.setItem("cs-agent-name", agentNameEl.value);
@@ -26,9 +27,17 @@ function agentName() {
 // a client-side dropdown.
 
 const roleSelectEl = document.getElementById("role-select");
+const roleGateSelectEl = document.getElementById("role-gate-select");
 const roleGateEl = document.getElementById("role-gate");
 let currentRole = localStorage.getItem("cs-role") || "";
 roleSelectEl.value = currentRole;
+roleGateSelectEl.value = currentRole;
+
+const AGENT_NAME_LABELS = {
+  CS_REP: "Agent name",
+  ADVISOR: "Advisor name",
+  OPERATIONS: "Operations name",
+};
 
 function authFetch(url, options = {}) {
   const headers = { ...(options.headers || {}) };
@@ -43,6 +52,9 @@ const PREFERRED_DEFAULT_TAB = { CS_REP: "chats", ADVISOR: "cases", OPERATIONS: "
 
 function applyRoleVisibility() {
   roleGateEl.hidden = Boolean(currentRole);
+  roleSelectEl.value = currentRole;
+  roleGateSelectEl.value = currentRole;
+  agentNameLabelEl.textContent = AGENT_NAME_LABELS[currentRole] || "Agent name";
 
   const tabButtons = document.querySelectorAll(".tab-btn");
   let preferredTab = null;
@@ -71,11 +83,14 @@ function applyRoleVisibility() {
   if (currentRole === "CS_REP") loadChatRequests();
 }
 
-roleSelectEl.addEventListener("change", () => {
-  currentRole = roleSelectEl.value;
+function onRoleChosen(role) {
+  currentRole = role;
   localStorage.setItem("cs-role", currentRole);
   applyRoleVisibility();
-});
+}
+
+roleSelectEl.addEventListener("change", () => onRoleChosen(roleSelectEl.value));
+roleGateSelectEl.addEventListener("change", () => onRoleChosen(roleGateSelectEl.value));
 
 // --- Tabs ---
 
