@@ -1,0 +1,468 @@
+/* Marketing/demo homepage for LF Bergslagen -- reuses the color tokens
+   defined in style.css (:root) so it stays visually consistent with the
+   chat app itself, which is embedded here as a widget. */
+
+.site-body {
+  display: block;
+  height: auto;
+  min-height: 100vh;
+  overflow-y: auto;
+}
+
+.site-nav {
+  align-items: center;
+  background: white;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  gap: 24px;
+  justify-content: space-between;
+  padding: 14px 32px;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.site-logo {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+}
+
+.site-logo-mark {
+  background: var(--lf-blue);
+  border-radius: 6px;
+  color: white;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  padding: 6px 8px;
+}
+
+.site-logo-text {
+  color: var(--lf-blue-dark);
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.site-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 22px;
+}
+
+.site-links a {
+  color: var(--text-main);
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.site-links a:hover {
+  color: var(--lf-blue);
+}
+
+.site-nav-cta {
+  background: var(--lf-blue);
+  border: none;
+  border-radius: 8px;
+  color: white;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 700;
+  padding: 10px 16px;
+  white-space: nowrap;
+}
+
+.site-nav-cta:hover {
+  background: var(--lf-blue-dark);
+}
+
+.hero {
+  align-items: center;
+  background: linear-gradient(135deg, #eef3f8 0%, var(--bg) 100%);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 32px;
+  padding: 64px 32px;
+}
+
+.hero-copy {
+  flex: 1 1 420px;
+}
+
+.hero-copy h1 {
+  color: var(--lf-blue-dark);
+  font-size: clamp(28px, 4vw, 42px);
+  line-height: 1.15;
+  margin: 0 0 16px;
+}
+
+.hero-copy p {
+  color: var(--text-muted);
+  font-size: 16px;
+  line-height: 1.6;
+  margin: 0 0 24px;
+  max-width: 52ch;
+}
+
+.hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.btn {
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 15px;
+  font-weight: 700;
+  padding: 12px 20px;
+  text-decoration: none;
+  display: inline-block;
+  border: none;
+}
+
+.btn-primary {
+  background: var(--lf-blue);
+  color: white;
+}
+
+.btn-primary:hover {
+  background: var(--lf-blue-dark);
+}
+
+.btn-secondary {
+  background: white;
+  border: 1px solid var(--border);
+  color: var(--lf-blue-dark);
+}
+
+.btn-secondary:hover {
+  border-color: var(--lf-blue);
+}
+
+.hero-art {
+  flex: 1 1 320px;
+  display: flex;
+  justify-content: center;
+}
+
+.hero-card {
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 20px 50px rgba(9, 41, 68, 0.12);
+  display: flex;
+  gap: 14px;
+  max-width: 340px;
+  padding: 20px;
+}
+
+.hero-card-avatar {
+  align-items: center;
+  background: var(--lf-blue);
+  border-radius: 50%;
+  color: white;
+  display: flex;
+  flex-shrink: 0;
+  font-weight: 700;
+  height: 40px;
+  justify-content: center;
+  width: 40px;
+}
+
+.hero-card strong {
+  color: var(--lf-blue-dark);
+  display: block;
+  margin-bottom: 6px;
+}
+
+.hero-card p {
+  color: var(--text-muted);
+  font-size: 14px;
+  font-style: italic;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.life-moments {
+  padding: 56px 32px;
+  text-align: center;
+}
+
+.life-moments h2 {
+  color: var(--lf-blue-dark);
+  font-size: 26px;
+  margin: 0 0 6px;
+}
+
+.section-sub {
+  color: var(--text-muted);
+  margin: 0 0 28px;
+}
+
+.moment-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  margin: 0 auto;
+  max-width: 900px;
+}
+
+.moment-card {
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  font-size: 28px;
+  gap: 8px;
+  padding: 20px 12px;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.moment-card span {
+  color: var(--text-main);
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.moment-card:hover {
+  border-color: var(--lf-blue);
+  box-shadow: 0 8px 20px rgba(9, 41, 68, 0.12);
+  transform: translateY(-2px);
+}
+
+.products {
+  background: white;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 32px;
+  padding: 48px 32px;
+}
+
+.product-col {
+  flex: 1 1 220px;
+}
+
+.product-col h3 {
+  color: var(--lf-blue-dark);
+  margin: 0 0 12px;
+}
+
+.product-col ul {
+  color: var(--text-muted);
+  line-height: 1.9;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.cta-band {
+  align-items: center;
+  background: var(--lf-blue);
+  color: white;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  justify-content: space-between;
+  padding: 40px 32px;
+}
+
+.cta-band h2 {
+  margin: 0 0 6px;
+}
+
+.cta-band p {
+  color: #d7e3ee;
+  margin: 0;
+}
+
+.cta-band-btn {
+  background: white;
+  color: var(--lf-blue-dark);
+  white-space: nowrap;
+}
+
+.cta-band-btn:hover {
+  background: #eef3f8;
+}
+
+.site-footer {
+  background: var(--lf-blue-dark);
+  color: #cfd9e3;
+  padding: 40px 32px 24px;
+}
+
+.footer-cols {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 40px;
+  margin-bottom: 24px;
+}
+
+.footer-cols > div {
+  flex: 1 1 200px;
+}
+
+.footer-blurb {
+  color: #a9b8c6;
+  font-size: 13.5px;
+  line-height: 1.6;
+  margin-top: 10px;
+  max-width: 32ch;
+}
+
+.footer-cols strong {
+  color: white;
+  display: block;
+  margin-bottom: 10px;
+}
+
+.footer-cols a {
+  color: #a9b8c6;
+  display: block;
+  font-size: 14px;
+  margin-bottom: 8px;
+  text-decoration: none;
+}
+
+.footer-cols a:hover {
+  color: white;
+}
+
+.site-footer .site-logo-text {
+  color: white;
+}
+
+.footer-disclaimer {
+  border-top: 1px solid rgba(255, 255, 255, 0.15);
+  color: #8397a8;
+  font-size: 12px;
+  margin: 0;
+  padding-top: 16px;
+}
+
+/* --- Floating chat widget (embeds the real chat app in an iframe) --- */
+
+.chat-widget-fab {
+  background: var(--lf-blue);
+  border: none;
+  border-radius: 50%;
+  bottom: 24px;
+  box-shadow: 0 10px 24px rgba(9, 41, 68, 0.3);
+  color: white;
+  cursor: pointer;
+  font-size: 26px;
+  height: 60px;
+  position: fixed;
+  right: 24px;
+  width: 60px;
+  z-index: 999;
+}
+
+.chat-widget-fab:hover {
+  background: var(--lf-blue-dark);
+}
+
+.chat-widget {
+  background: white;
+  border-radius: 12px;
+  bottom: 96px;
+  box-shadow: 0 20px 60px rgba(9, 41, 68, 0.3);
+  display: flex;
+  flex-direction: column;
+  /* Bounded by the space actually available above the fixed 96px bottom
+     offset (plus a 20px top margin) -- NOT a fixed vh fraction. Sizing
+     this off vh alone let the panel's top edge land above the viewport
+     on shorter screens, hiding the header (and its close/maximize
+     buttons) with no way to scroll back up to it. */
+  height: min(640px, calc(100vh - 116px));
+  max-height: calc(100vh - 116px);
+  overflow: hidden;
+  position: fixed;
+  right: 24px;
+  transition: width 0.15s ease, height 0.15s ease;
+  width: min(380px, calc(100vw - 32px));
+  z-index: 1000;
+}
+
+/* The widget sets its own display: flex above, which -- being an author
+   style -- otherwise beats the browser's default [hidden] { display: none },
+   so the panel would stay visible after "closing" it. This rule restores
+   hidden actually hiding it. */
+.chat-widget[hidden] {
+  display: none;
+}
+
+/* Expanded/"maximized" state: gives the embedded chat app enough width
+   (and height) that its own topbar, sidebar, and topic list get their
+   normal full-size layout instead of the cramped mobile one. Still capped
+   by the same on-screen max-height as the default size. */
+.chat-widget.expanded {
+  height: min(820px, calc(100vh - 116px));
+  width: min(760px, calc(100vw - 32px));
+}
+
+/* True full screen -- covers the whole viewport, edge to edge, for
+   customers who want the chat as its own full page rather than a corner
+   panel. Mutually exclusive with .expanded (site.js only ever applies
+   one size class at a time). */
+.chat-widget.fullscreen {
+  border-radius: 0;
+  bottom: 0;
+  height: 100vh;
+  left: 0;
+  max-height: none;
+  right: 0;
+  top: 0;
+  width: 100vw;
+}
+
+.chat-widget-header {
+  align-items: center;
+  background: var(--lf-blue);
+  color: white;
+  display: flex;
+  flex-shrink: 0;
+  font-weight: 700;
+  justify-content: space-between;
+  padding: 12px 14px;
+}
+
+.chat-widget-header-actions {
+  align-items: center;
+  display: flex;
+  gap: 4px;
+}
+
+.chat-widget-header button {
+  background: none;
+  border: none;
+  border-radius: 6px;
+  color: white;
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  padding: 6px 8px;
+}
+
+.chat-widget-header button:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.chat-widget-frame {
+  border: none;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+}
+
+@media (max-width: 520px) {
+  .site-links {
+    display: none;
+  }
+}

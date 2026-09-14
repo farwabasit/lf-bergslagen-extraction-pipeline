@@ -14,6 +14,7 @@ const sendBtn = document.getElementById("send-btn");
 const homeBtn = document.getElementById("home-btn");
 const newChatBtn = document.getElementById("new-chat-btn");
 const chatListEl = document.getElementById("chat-list");
+const chatShellEl = document.querySelector(".chat-shell");
 
 // The toggle sets the UI language and is a fallback for ambiguous messages,
 // but the backend still matches whatever language the user actually types
@@ -36,9 +37,10 @@ const I18N = {
     supportLabel: "LF Bergslagen · Support",
     aiLabel: "Sara · AI assistant",
     thinking: "Thinking...",
-    uploadError: "Couldn't read that file. Try a .txt or .pdf under 5MB.",
+    uploadError: "Couldn't read one of those files. Try files under 5MB each.",
     chatError: "Something went wrong reaching the navigator. Please try again.",
     speechLang: "en-US",
+    topicPrompt: "Not sure where to start? Choose a topic",
     chips: [
       { label: "Buying a house", text: "I'd like help with buying a house" },
       { label: "Moving in together", text: "My partner and I are moving in together" },
@@ -73,9 +75,10 @@ const I18N = {
     supportLabel: "LF Bergslagen · Support",
     aiLabel: "Sara · AI-assistent",
     thinking: "Tänker...",
-    uploadError: "Kunde inte läsa filen. Prova en .txt eller .pdf under 5MB.",
+    uploadError: "Kunde inte läsa en av filerna. Prova filer under 5 MB styck.",
     chatError: "Något gick fel. Försök igen.",
     speechLang: "sv-SE",
+    topicPrompt: "Osäker på var du ska börja? Välj ett ämne",
     chips: [
       { label: "Köpa hus", text: "Jag skulle vilja ha hjälp med att köpa hus" },
       { label: "Flytta ihop", text: "Min partner och jag ska flytta ihop" },
@@ -117,13 +120,34 @@ function applyLanguage(lang) {
   micBtn.title = strings.micTitle;
 
   chipsEl.innerHTML = "";
+  const dropdown = document.createElement("div");
+  dropdown.className = "topic-dropdown";
+
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.className = "topic-dropdown-toggle";
+  toggle.innerHTML = `<span>${strings.topicPrompt}</span><span class="caret">▾</span>`;
+
+  const menu = document.createElement("div");
+  menu.className = "topic-dropdown-menu";
+  menu.hidden = true;
+
   for (const chip of strings.chips) {
-    const btn = document.createElement("button");
-    btn.className = "chip";
-    btn.dataset.text = chip.text;
-    btn.textContent = chip.label;
-    chipsEl.appendChild(btn);
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "topic-dropdown-item";
+    item.dataset.text = chip.text;
+    item.textContent = chip.label;
+    menu.appendChild(item);
   }
+
+  toggle.addEventListener("click", () => {
+    menu.hidden = !menu.hidden;
+    toggle.classList.toggle("open", !menu.hidden);
+  });
+
+  dropdown.append(toggle, menu);
+  chipsEl.appendChild(dropdown);
 
   langToggleEl.querySelectorAll(".lang-btn").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.lang === currentLang);
@@ -137,6 +161,7 @@ langToggleEl.addEventListener("click", (e) => {
 });
 
 let history = [];
+let stagedFiles = [];
 let sessionMessageCount = 0; // how many session-store messages we've already accounted for
 let humanHandoffActive = false; // once true, the composer talks to a human, not the AI
 let lastKnownAgent = null; // name of the CS agent assigned to this session, if any
@@ -328,6 +353,173 @@ function addBubble(role, text, { markdown = false, label = "", speakable = false
   return div;
 }
 
+// Which family a file belongs to, used both to pick an icon and to decide
+// how (or whether) the browser can actually render the original file.
+function getFileKind(filename, mimeType) {
+  const lower = (filename || "").toLowerCase();
+  if ((mimeType && mimeType.startsWith("image/")) || /\.(png|jpe?g|gif|webp|bmp|svg)$/.test(lower)) {
+    return "image";
+  }
+  if (lower.endsWith(".pdf")) return "pdf";
+  if (lower.endsWith(".docx") || lower.endsWith(".doc")) return "doc";
+  if (lower.endsWith(".xlsx") || lower.endsWith(".xls")) return "sheet";
+  if (lower.endsWith(".txt")) return "text";
+  return "other";
+}
+
+const FILE_KIND_ICON = {
+  image: "🖼️",
+  pdf: "📕",
+  doc: "📄",
+  sheet: "📊",
+  text: "📃",
+  other: "📎",
+};
+
+function addAttachmentBubble(attachments) {
+  if (!attachments.length) return;
+
+  const div = document.createElement("div");
+  div.className = "msg attachment";
+
+  const title = document.createElement("div");
+  title.className = "sent-attachment-title";
+  title.textContent = `Attached ${attachments.length} file${attachments.length === 1 ? "" : "s"}`;
+  div.appendChild(title);
+
+  for (const attachment of attachments) {
+    const row = document.createElement("div");
+    row.className = "sent-attachment";
+
+    if (attachment.kind === "image" && attachment.previewUrl) {
+      const preview = document.createElement("img");
+      preview.className = "sent-attachment-thumb";
+      preview.src = attachment.previewUrl;
+      preview.alt = attachment.filename;
+      row.appendChild(preview);
+    } else {
+      const icon = document.createElement("span");
+      icon.className = "sent-attachment-icon";
+      icon.textContent = FILE_KIND_ICON[attachment.kind] || FILE_KIND_ICON.other;
+      row.appendChild(icon);
+    }
+
+    const name = document.createElement("span");
+    name.className = "sent-attachment-name";
+    name.textContent = attachment.filename;
+    name.title = attachment.filename;
+    row.appendChild(name);
+
+    const view = document.createElement("button");
+    view.type = "button";
+    view.className = "sent-attachment-view";
+    view.textContent = "View";
+    view.addEventListener("click", () => showAttachmentViewer(attachment));
+    row.appendChild(view);
+
+    div.appendChild(row);
+  }
+
+  messagesEl.appendChild(div);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+// Shows the actual attached file whenever the browser can render it natively
+// (images, PDFs). For formats browsers can't display inline (Word, Excel,
+// legacy .doc/.xls, ...) it offers the real original file to open/download,
+// plus the plain-text version Sara read, clearly labelled as a fallback --
+// never presenting extracted text as if it were the document itself.
+function showAttachmentViewer(attachment) {
+  const overlay = document.createElement("div");
+  overlay.className = "attachment-viewer";
+
+  const modal = document.createElement("div");
+  modal.className = "attachment-viewer-modal";
+
+  const header = document.createElement("div");
+  header.className = "attachment-viewer-header";
+
+  const title = document.createElement("strong");
+  title.textContent = attachment.filename;
+
+  const headerActions = document.createElement("div");
+  headerActions.className = "attachment-viewer-actions";
+
+  if (attachment.previewUrl) {
+    const openLink = document.createElement("a");
+    openLink.className = "attachment-viewer-open";
+    openLink.href = attachment.previewUrl;
+    openLink.download = attachment.filename;
+    openLink.textContent = "Download";
+    headerActions.appendChild(openLink);
+  }
+
+  const close = document.createElement("button");
+  close.type = "button";
+  close.textContent = "Close";
+  close.addEventListener("click", () => overlay.remove());
+  headerActions.appendChild(close);
+
+  header.append(title, headerActions);
+  modal.appendChild(header);
+
+  const canRenderNatively = attachment.previewUrl && (attachment.kind === "image" || attachment.kind === "pdf");
+
+  if (attachment.kind === "image" && attachment.previewUrl) {
+    const image = document.createElement("img");
+    image.className = "attachment-viewer-image";
+    image.src = attachment.previewUrl;
+    image.alt = attachment.filename;
+    modal.appendChild(image);
+  } else if (attachment.kind === "pdf" && attachment.previewUrl) {
+    const frame = document.createElement("iframe");
+    frame.className = "attachment-viewer-frame";
+    frame.src = attachment.previewUrl;
+    frame.title = attachment.filename;
+    modal.appendChild(frame);
+  } else {
+    const placeholder = document.createElement("div");
+    placeholder.className = "attachment-viewer-placeholder";
+    const icon = document.createElement("span");
+    icon.className = "attachment-viewer-placeholder-icon";
+    icon.textContent = FILE_KIND_ICON[attachment.kind] || FILE_KIND_ICON.other;
+    placeholder.appendChild(icon);
+    const note = document.createElement("p");
+    note.textContent = attachment.previewUrl
+      ? "This file type can't be previewed in the browser. Download it to open the original."
+      : "The original file isn't available to preview in this chat history -- here's the text Sara read from it.";
+    placeholder.appendChild(note);
+    modal.appendChild(placeholder);
+  }
+
+  if (attachment.text && !canRenderNatively) {
+    const contentLabel = document.createElement("div");
+    contentLabel.className = "attachment-viewer-content-label";
+    contentLabel.textContent = "Text Sara read from this file";
+    modal.appendChild(contentLabel);
+
+    const content = document.createElement("pre");
+    content.className = "attachment-viewer-content";
+    content.textContent = attachment.text;
+    modal.appendChild(content);
+  }
+
+  overlay.addEventListener("click", (event) => {
+    if (event.target === overlay) overlay.remove();
+  });
+
+  document.addEventListener(
+    "keydown",
+    (event) => {
+      if (event.key === "Escape") overlay.remove();
+    },
+    { once: true }
+  );
+
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+}
+
 // --- Follow-up suggestion chips shown under an assistant reply ---
 
 function addSuggestions(suggestions, humanChatOption) {
@@ -493,43 +685,161 @@ async function getAssistantReply() {
   }
 }
 
-async function sendMessage(text) {
-  if (!text.trim()) return;
-  chipsEl.style.display = "none";
-  addBubble("user", text);
+function fileKey(file) {
+  return `${file.name}:${file.size}:${file.lastModified}`;
+}
 
-  if (humanHandoffActive) {
-    try {
-      const res = await fetch(`/api/sessions/${sessionId}/customer-message`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: text }),
-      });
-      const data = await res.json();
-      if (typeof data.message_count === "number") sessionMessageCount = data.message_count;
-    } catch (err) {
-      console.error(err);
-    }
+function formatFileSize(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function renderAttachmentPreview(status = "") {
+  attachmentPreviewEl.innerHTML = "";
+  if (!stagedFiles.length && !status) {
+    attachmentPreviewEl.hidden = true;
     return;
   }
 
-  history.push({ role: "user", content: text });
-  await getAssistantReply();
+  attachmentPreviewEl.hidden = false;
+  const header = document.createElement("div");
+  header.className = "attachment-preview-header";
+  header.textContent = status || `${stagedFiles.length} attachment${stagedFiles.length === 1 ? "" : "s"} ready`;
+  attachmentPreviewEl.appendChild(header);
+
+  const list = document.createElement("div");
+  list.className = "attachment-list";
+  stagedFiles.forEach((file, index) => {
+    const item = document.createElement("div");
+    item.className = "attachment-item";
+
+    const name = document.createElement("span");
+    name.className = "attachment-name";
+    name.textContent = file.name;
+    name.title = file.name;
+
+    const size = document.createElement("span");
+    size.className = "attachment-size";
+    size.textContent = formatFileSize(file.size);
+
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.title = "Remove attachment";
+    remove.textContent = "x";
+    remove.addEventListener("click", () => {
+      stagedFiles.splice(index, 1);
+      renderAttachmentPreview();
+    });
+
+    item.append(name, size, remove);
+    list.appendChild(item);
+  });
+  attachmentPreviewEl.appendChild(list);
 }
 
-async function sendAttachment(filename, text) {
+function stageFiles(files) {
+  const existing = new Set(stagedFiles.map(fileKey));
+  for (const file of Array.from(files || [])) {
+    if (!existing.has(fileKey(file))) {
+      stagedFiles.push(file);
+      existing.add(fileKey(file));
+    }
+  }
+  renderAttachmentPreview();
+}
+
+async function uploadFiles(files) {
+  const uploads = [];
+  for (let index = 0; index < files.length; index += 1) {
+    const file = files[index];
+    renderAttachmentPreview(`Uploading ${index + 1} of ${files.length}...`);
+    const formData = new FormData();
+    formData.append("file", file);
+    const res = await fetch("/api/upload", { method: "POST", body: formData });
+    if (!res.ok) throw new Error(`Upload failed with ${res.status}`);
+    const upload = await res.json();
+    uploads.push({
+      ...upload,
+      // The original bytes stay in the browser as a blob URL so the viewer
+      // can show/download the real file, not just the text extracted from it.
+      previewUrl: URL.createObjectURL(file),
+      kind: getFileKind(upload.filename || file.name, file.type),
+    });
+  }
+  return uploads;
+}
+
+function buildMessageText(text, attachments) {
+  const parts = [];
+  if (text.trim()) parts.push(text.trim());
+
+  for (const attachment of attachments) {
+    const extractedText = attachment.text || "No readable text was extracted from this file.";
+    parts.push(`[Attached file: ${attachment.filename}]\n\n${extractedText}`);
+  }
+
+  return parts.join("\n\n");
+}
+
+function showSubmittedMessage(text, attachments) {
+  if (text.trim()) addBubble("user", text.trim());
+  if (attachments.length) {
+    addAttachmentBubble(attachments);
+  }
+}
+
+function setComposerBusy(busy) {
+  inputEl.disabled = busy;
+  sendBtn.disabled = busy;
+  attachBtn.disabled = busy;
+  micBtn.disabled = busy;
+}
+
+async function sendMessage(text, files = []) {
+  const textToSend = text.trim();
+  if (!textToSend && !files.length) return;
+
   chipsEl.style.display = "none";
-  addBubble("attachment", `📎 ${filename}`);
-  history.push({ role: "user", content: `[Attached document: ${filename}]\n\n${text}` });
-  await getAssistantReply();
+  setComposerBusy(true);
+
+  try {
+    const attachments = files.length ? await uploadFiles(files) : [];
+    const content = buildMessageText(textToSend, attachments);
+    showSubmittedMessage(textToSend, attachments);
+    inputEl.value = "";
+    inputEl.style.height = "auto";
+
+    stagedFiles = [];
+    renderAttachmentPreview();
+
+    if (humanHandoffActive) {
+      const res = await fetch(`/api/sessions/${sessionId}/customer-message`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content }),
+      });
+      const data = await res.json();
+      if (typeof data.message_count === "number") sessionMessageCount = data.message_count;
+      return;
+    }
+
+    history.push({ role: "user", content });
+    await getAssistantReply();
+  } catch (err) {
+    console.error(err);
+    renderAttachmentPreview(t().uploadError);
+  } finally {
+    setComposerBusy(false);
+    inputEl.focus();
+  }
 }
 
 formEl.addEventListener("submit", (e) => {
   e.preventDefault();
   const text = inputEl.value;
-  inputEl.value = "";
-  inputEl.style.height = "auto";
-  sendMessage(text);
+  const filesToSend = stagedFiles.slice();
+  sendMessage(text, filesToSend);
 });
 
 // Enter sends the message; Shift+Enter inserts a newline instead.
@@ -547,38 +857,54 @@ inputEl.addEventListener("input", () => {
 });
 
 chipsEl.addEventListener("click", (e) => {
-  const btn = e.target.closest(".chip");
+  const btn = e.target.closest(".topic-dropdown-item");
   if (!btn) return;
   sendMessage(btn.dataset.text);
+});
+
+// Close the topic dropdown when clicking outside it or pressing Escape.
+document.addEventListener("click", (e) => {
+  const toggle = chipsEl.querySelector(".topic-dropdown-toggle");
+  const menu = chipsEl.querySelector(".topic-dropdown-menu");
+  if (!toggle || !menu || menu.hidden) return;
+  if (!e.target.closest(".topic-dropdown")) {
+    menu.hidden = true;
+    toggle.classList.remove("open");
+  }
+});
+
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  const toggle = chipsEl.querySelector(".topic-dropdown-toggle");
+  const menu = chipsEl.querySelector(".topic-dropdown-menu");
+  if (menu && !menu.hidden) {
+    menu.hidden = true;
+    toggle.classList.remove("open");
+  }
 });
 
 // --- Document upload ---
 
 attachBtn.addEventListener("click", () => fileInput.click());
 
-fileInput.addEventListener("change", async () => {
-  const file = fileInput.files[0];
+fileInput.addEventListener("change", () => {
+  stageFiles(fileInput.files);
   fileInput.value = "";
-  if (!file) return;
+});
 
-  attachmentPreviewEl.hidden = false;
-  attachmentPreviewEl.textContent = `Uploading ${file.name}...`;
+["dragenter", "dragover"].forEach((eventName) => {
+  chatShellEl.addEventListener(eventName, (event) => {
+    event.preventDefault();
+    chatShellEl.classList.add("drag-over");
+  });
+});
 
-  try {
-    const formData = new FormData();
-    formData.append("file", file);
-    const res = await fetch("/api/upload", { method: "POST", body: formData });
-    if (!res.ok) throw new Error(`Upload failed with ${res.status}`);
-    const data = await res.json();
-    attachmentPreviewEl.hidden = true;
-    await sendAttachment(data.filename, data.text);
-  } catch (err) {
-    attachmentPreviewEl.textContent = t().uploadError;
-    console.error(err);
-    setTimeout(() => {
-      attachmentPreviewEl.hidden = true;
-    }, 4000);
-  }
+["dragleave", "drop"].forEach((eventName) => {
+  chatShellEl.addEventListener(eventName, (event) => {
+    event.preventDefault();
+    if (eventName === "drop") stageFiles(event.dataTransfer.files);
+    chatShellEl.classList.remove("drag-over");
+  });
 });
 
 // --- Voice input (browser speech-to-text, no backend involved) ---
@@ -722,7 +1048,9 @@ function resetChatView() {
   greetingTextEl = document.getElementById("greeting-text");
 
   chipsEl.style.display = "";
+  stagedFiles = [];
   attachmentPreviewEl.hidden = true;
+  attachmentPreviewEl.innerHTML = "";
   inputEl.value = "";
   inputEl.style.height = "auto";
   humanBtn.disabled = false;
@@ -743,9 +1071,25 @@ function startNewChat() {
   renderChatList();
 }
 
-function attachmentLabelFrom(content) {
-  const match = content.match(/^\[Attached document: (.+?)\]/);
-  return match ? `📎 ${match[1]}` : null;
+function parseUserMessageContent(content) {
+  const attachmentRegex = /\[Attached (?:document|file): (.+?)\]\n\n([\s\S]*?)(?=\n\n\[Attached (?:document|file): |\s*$)/g;
+  const attachments = [];
+  let firstAttachmentIndex = content.length;
+  let match;
+
+  while ((match = attachmentRegex.exec(content)) !== null) {
+    firstAttachmentIndex = Math.min(firstAttachmentIndex, match.index);
+    attachments.push({
+      filename: match[1],
+      text: match[2].trim(),
+      kind: getFileKind(match[1], ""),
+    });
+  }
+
+  return {
+    text: content.slice(0, firstAttachmentIndex).trim(),
+    attachments,
+  };
 }
 
 async function loadChat(id) {
@@ -768,11 +1112,11 @@ async function loadChat(id) {
     messagesEl.innerHTML = "";
     chipsEl.style.display = "none";
     for (const msg of data.messages) {
-      const attachmentLabel = msg.role === "user" ? attachmentLabelFrom(msg.content) : null;
-      if (attachmentLabel) {
-        addBubble("attachment", attachmentLabel);
-      } else if (msg.role === "user") {
-        addBubble("user", msg.content);
+      if (msg.role === "user") {
+        const parsed = parseUserMessageContent(msg.content);
+        if (parsed.text) addBubble("user", parsed.text);
+        if (parsed.attachments.length) addAttachmentBubble(parsed.attachments);
+        if (!parsed.text && !parsed.attachments.length) addBubble("user", msg.content);
       } else if (msg.role === "assistant") {
         addBubble("assistant", msg.content, { markdown: true, label: t().aiLabel, speakable: true });
       } else if (msg.role === "human") {
@@ -788,6 +1132,20 @@ async function loadChat(id) {
     console.error(err);
   }
 }
+
+// --- Embeddable widget integration: lets a parent marketing page (see
+// site.html/site.js) trigger a message in this chat from the outside,
+// e.g. when a visitor clicks a "life moment" card on the public site. ---
+window.addEventListener("message", (event) => {
+  const data = event.data;
+  if (data && data.type === "ltn-send" && typeof data.text === "string") {
+    sendMessage(data.text);
+  } else if (data && data.type === "ltn-widget-mode") {
+    // Sent by site.js: "compact" (small bubble -- no room for the
+    // sidebar) or "full" (maximized -- show the normal full interface).
+    document.body.classList.toggle("widget-compact", data.mode === "compact");
+  }
+});
 
 homeBtn.addEventListener("click", startNewChat);
 homeBtn.addEventListener("keydown", (e) => {
