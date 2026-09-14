@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LF Bergslagen — Demo site</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="site.css" />
+</head>
+<body class="site-body">
+  <header class="site-nav">
+    <div class="site-logo">
+      <span class="site-logo-mark">LF</span>
+      <span class="site-logo-text">Bergslagen</span>
+    </div>
+    <nav class="site-links">
+      <a href="#loans">Loans &amp; Mortgages</a>
+      <a href="#insurance">Insurance</a>
+      <a href="#pension">Pension &amp; Savings</a>
+      <a href="#become-customer">Become a customer</a>
+    </nav>
+    <button id="nav-chat-btn" class="site-nav-cta" type="button">💬 Chat with Sara</button>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="hero-copy">
+        <h1>Life brings changes.<br />We help you navigate them.</h1>
+        <p>
+          From buying your first home to planning retirement, LF Bergslagen's
+          digital assistant Sara is ready around the clock with answers,
+          guidance, and a direct line to a real advisor when you need one.
+        </p>
+        <div class="hero-actions">
+          <button id="hero-chat-btn" class="btn btn-primary" type="button">💬 Chat with Sara</button>
+          <a href="#life-moments" class="btn btn-secondary">See what we help with</a>
+        </div>
+      </div>
+      <div class="hero-art" aria-hidden="true">
+        <div class="hero-card">
+          <span class="hero-card-avatar">S</span>
+          <div>
+            <strong>Sara · AI assistant</strong>
+            <p>"Tell me what's changing in your life, and I'll help you think it through."</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="life-moments" class="life-moments">
+      <h2>What's changing in your life?</h2>
+      <p class="section-sub">Tap one below to start a chat with Sara about it.</p>
+      <div class="moment-grid">
+        <button class="moment-card" data-text="I'd like help with buying a house">🏠<span>Buying a house</span></button>
+        <button class="moment-card" data-text="My partner and I are moving in together">🏡<span>Moving in together</span></button>
+        <button class="moment-card" data-text="We're having a baby soon">👶<span>Having a child</span></button>
+        <button class="moment-card" data-text="I'm going through a divorce">📄<span>Divorce</span></button>
+        <button class="moment-card" data-text="I'm starting my own business">💼<span>Starting a business</span></button>
+        <button class="moment-card" data-text="I'm retiring soon">🌅<span>Retirement</span></button>
+        <button class="moment-card" data-text="I'd like help with buying a holiday home">🏖️<span>Holiday home</span></button>
+        <button class="moment-card" data-text="I'd like help with buying a car">🚗<span>Buying a car</span></button>
+      </div>
+    </section>
+
+    <section id="loans" class="products">
+      <div class="product-col">
+        <h3>Loans &amp; Mortgages</h3>
+        <ul>
+          <li>Home loans &amp; mortgages</li>
+          <li>Holiday home financing</li>
+          <li>Car loans</li>
+          <li>Loan &amp; interest calculators</li>
+        </ul>
+      </div>
+      <div class="product-col" id="insurance">
+        <h3>Insurance</h3>
+        <ul>
+          <li>Home insurance</li>
+          <li>Car insurance</li>
+          <li>Life insurance</li>
+          <li>Child &amp; family insurance</li>
+          <li>Accident &amp; health insurance</li>
+          <li>Loan protection insurance</li>
+        </ul>
+      </div>
+      <div class="product-col" id="pension">
+        <h3>Pension &amp; Savings</h3>
+        <ul>
+          <li>Retirement planning</li>
+          <li>Savings accounts</li>
+          <li>Fund &amp; pension advice</li>
+        </ul>
+      </div>
+    </section>
+
+    <section id="become-customer" class="cta-band">
+      <div>
+        <h2>New to LF Bergslagen?</h2>
+        <p>Ask Sara what becoming a customer involves, or request a callback from a local advisor.</p>
+      </div>
+      <button class="btn btn-primary cta-band-btn" type="button" data-text="I'd like to become a customer">💬 Ask Sara</button>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="footer-cols">
+      <div>
+        <div class="site-logo">
+          <span class="site-logo-mark">LF</span>
+          <span class="site-logo-text">Bergslagen</span>
+        </div>
+        <p class="footer-blurb">Local, member-focused financial services — now with an AI assistant to help you through life's transitions.</p>
+      </div>
+      <div>
+        <strong>Company</strong>
+        <a href="#">About us</a>
+        <a href="#">Careers</a>
+        <a href="#">Sustainability</a>
+      </div>
+      <div>
+        <strong>Support</strong>
+        <a href="#" id="footer-chat-link">Chat with Sara</a>
+        <a href="#">Find an office</a>
+        <a href="/dashboard.html">Advisor dashboard</a>
+      </div>
+    </div>
+    <p class="footer-disclaimer">
+      This is a demo prototype built for an AI-agent hackathon and is not the
+      official Länsförsäkringar Bergslagen website.
+    </p>
+  </footer>
+
+  <div id="chat-widget" class="chat-widget" hidden>
+    <div class="chat-widget-header">
+      <span>Sara · AI assistant</span>
+      <div class="chat-widget-header-actions">
+        <button id="chat-widget-maximize" type="button" title="Expand" aria-label="Expand chat">⤢</button>
+        <button id="chat-widget-fullscreen" type="button" title="Full screen" aria-label="Full screen chat">⛶</button>
+        <button id="chat-widget-close" type="button" title="Minimize" aria-label="Minimize chat">✕</button>
+      </div>
+    </div>
+    <iframe id="chat-widget-frame" class="chat-widget-frame" title="Chat with Sara" src="about:blank"></iframe>
+  </div>
+  <button id="chat-widget-fab" class="chat-widget-fab" type="button" aria-label="Open chat">💬</button>
+
+  <script src="site.js"></script>
+</body>
+</html>

@@ -26,6 +26,20 @@ FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 
 MAX_UPLOAD_BYTES = 5 * 1024 * 1024
 
+ALLOWED_UPLOAD_EXTENSIONS = {
+    ".pdf",
+    ".txt",
+    ".doc",
+    ".docx",
+    ".xls",
+    ".xlsx",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".webp",
+}
+
 
 class ChatMessage(BaseModel):
     role: str
@@ -65,11 +79,19 @@ def chat(req: ChatRequest) -> dict:
 
 @app.post("/api/upload")
 async def upload(file: UploadFile = File(...)) -> dict:
+    filename = file.filename or "document"
+    extension = Path(filename).suffix.lower()
+    if extension and extension not in ALLOWED_UPLOAD_EXTENSIONS:
+        raise HTTPException(
+            status_code=415,
+            detail="Unsupported file type. Please attach a PDF, Word, Excel, text, or image file.",
+        )
+
     data = await file.read()
     if len(data) > MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail="File too large (max 5MB)")
-    text = extract_text(file.filename or "document", data)
-    return {"filename": file.filename, "text": text}
+    text = extract_text(filename, data)
+    return {"filename": filename, "text": text}
 
 
 @app.post("/api/sessions/{session_id}/request-human")

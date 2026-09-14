@@ -200,6 +200,12 @@ body {
   min-height: 0;
 }
 
+.chat-shell.drag-over {
+  outline: 2px dashed var(--lf-blue);
+  outline-offset: -8px;
+  background: #eef3f8;
+}
+
 .messages {
   flex: 1;
   overflow-y: auto;
@@ -295,27 +301,242 @@ body {
   align-self: flex-end;
   color: var(--lf-blue-dark);
   font-size: 13.5px;
+  min-width: min(360px, 80%);
+  white-space: normal;
+}
+
+.sent-attachment-title {
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+.sent-attachment {
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  min-width: 0;
+  padding: 8px;
+}
+
+.sent-attachment-name {
+  flex: 1;
+  font-weight: 600;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.sent-attachment-view {
+  background: var(--lf-blue);
+  border: none;
+  border-radius: 6px;
+  color: white;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 6px 10px;
+  white-space: nowrap;
+}
+
+.sent-attachment-thumb {
+  border-radius: 4px;
+  height: 34px;
+  object-fit: cover;
+  width: 34px;
+}
+
+.sent-attachment-icon {
+  align-items: center;
+  background: #eef3f8;
+  border-radius: 4px;
+  display: flex;
+  flex-shrink: 0;
+  font-size: 18px;
+  height: 34px;
+  justify-content: center;
+  width: 34px;
+}
+
+.attachment-viewer {
+  align-items: center;
+  background: rgba(9, 41, 68, 0.45);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 20px;
+  position: fixed;
+  z-index: 1000;
+}
+
+.attachment-viewer-modal {
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 18px 50px rgba(9, 41, 68, 0.25);
+  display: flex;
+  flex-direction: column;
+  max-height: min(720px, 90vh);
+  max-width: min(760px, 94vw);
+  overflow: hidden;
+  width: 100%;
+}
+
+.attachment-viewer-header {
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 12px 14px;
+}
+
+.attachment-viewer-header strong {
+  overflow-wrap: anywhere;
+}
+
+.attachment-viewer-header button,
+.attachment-viewer-open {
+  background: var(--lf-blue);
+  border: none;
+  border-radius: 6px;
+  color: white;
+  cursor: pointer;
+  font-weight: 700;
+  padding: 7px 11px;
+  text-decoration: none;
+}
+
+.attachment-viewer-actions {
+  align-items: center;
+  display: flex;
+  flex-shrink: 0;
+  gap: 8px;
+}
+
+.attachment-viewer-content-label {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+  padding: 12px 14px 0;
+}
+
+.attachment-viewer-content {
+  color: var(--text-main);
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.45;
+  margin: 0;
+  overflow: auto;
+  padding: 8px 14px 14px;
+  white-space: pre-wrap;
+}
+
+.attachment-viewer-image {
+  display: block;
+  max-height: 320px;
+  max-width: 100%;
+  object-fit: contain;
+  padding: 14px 14px 0;
+}
+
+.attachment-viewer-frame {
+  background: #525659;
+  border: none;
+  flex: 1;
+  min-height: min(560px, 70vh);
+  width: 100%;
+}
+
+.attachment-viewer-placeholder {
+  align-items: center;
+  color: var(--text-muted);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 28px 14px;
+  text-align: center;
+}
+
+.attachment-viewer-placeholder-icon {
+  font-size: 40px;
 }
 
 .chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
   padding: 8px 0 4px;
 }
 
-.chip {
-  background: white;
-  border: 1px solid var(--border);
-  color: var(--lf-blue-dark);
-  border-radius: 999px;
-  padding: 6px 12px;
-  font-size: 13px;
-  cursor: pointer;
+/* The initial "not sure where to start" topic list -- a dropdown instead
+   of a big wrapped grid of pill buttons, so it stays compact both on the
+   full-page chat and when the chat is embedded narrow (see site.js widget). */
+.topic-dropdown {
+  display: inline-block;
+  position: relative;
 }
 
-.chip:hover {
+.topic-dropdown-toggle {
+  align-items: center;
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--lf-blue-dark);
+  cursor: pointer;
+  display: flex;
+  font-size: 13.5px;
+  font-weight: 600;
+  gap: 8px;
+  padding: 8px 12px;
+}
+
+.topic-dropdown-toggle:hover {
+  border-color: var(--lf-blue);
+}
+
+.topic-dropdown-toggle .caret {
+  color: var(--text-muted);
+  font-size: 11px;
+  transition: transform 0.15s ease;
+}
+
+.topic-dropdown-toggle.open .caret {
+  transform: rotate(180deg);
+}
+
+.topic-dropdown-menu {
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  bottom: 100%;
+  box-shadow: 0 12px 30px rgba(9, 41, 68, 0.15);
+  left: 0;
+  margin-bottom: 6px;
+  max-height: 260px;
+  overflow-y: auto;
+  position: absolute;
+  width: max(240px, 100%);
+  z-index: 20;
+}
+
+.topic-dropdown-item {
+  background: none;
+  border: none;
+  color: var(--text-main);
+  cursor: pointer;
+  display: block;
+  font-size: 13.5px;
+  padding: 9px 12px;
+  text-align: left;
+  width: 100%;
+}
+
+.topic-dropdown-item:hover {
   background: #eef3f8;
+  color: var(--lf-blue-dark);
+}
+
+.topic-dropdown-item + .topic-dropdown-item {
+  border-top: 1px solid var(--border);
 }
 
 .suggestions {
@@ -498,25 +719,67 @@ body {
 
 .attachment-preview {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  gap: 6px;
   background: #eef3f8;
   border: 1px solid #b9c9dc;
   border-radius: 8px;
-  padding: 6px 10px;
+  padding: 8px 10px;
   font-size: 13px;
   color: var(--lf-blue-dark);
   margin-bottom: 8px;
 }
 
+.attachment-preview-header {
+  width: 100%;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.attachment-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  width: 100%;
+}
+
+.attachment-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.attachment-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachment-size {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
 .attachment-preview button {
-  margin-left: auto;
   background: none;
   border: none;
   color: var(--text-muted);
   cursor: pointer;
   font-size: 15px;
   line-height: 1;
+}
+
+/* Set on <body> by app.js when this page is embedded as a small widget
+   (see site.js) -- there's no room for the new-chat/previous-chats
+   sidebar at that size, so hide it outright instead of shrinking it to
+   an icon-only column. Maximizing the widget removes this class, and
+   the sidebar reappears at full size (its width is well above the
+   640px breakpoint below by then). Standalone/mobile use of this page
+   never gets this class, so its own icon-only collapse is unaffected. */
+body.widget-compact .sidebar {
+  display: none;
 }
 
 @media (max-width: 640px) {
