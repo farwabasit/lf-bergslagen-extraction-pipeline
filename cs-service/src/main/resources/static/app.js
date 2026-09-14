@@ -208,7 +208,7 @@ function openCaseModal(c) {
     .map(([k, v]) => `<dt>${formatExtraKey(k)}</dt><dd>${v}</dd>`)
     .join("");
   const auditLink = extra.auditCustomerId
-    ? `<dt>Audit trail</dt><dd><a href="${PYTHON_APP_BASE}/api/audit/${extra.auditCustomerId}" target="_blank" rel="noopener">View full decision history ↗</a></dd>`
+    ? `<dt>Audit trail</dt><dd><a href="${PYTHON_APP_BASE}/audit.html?customer_id=${extra.auditCustomerId}" target="_blank" rel="noopener">View full decision history ↗</a></dd>`
     : "";
 
   const approveBtn =

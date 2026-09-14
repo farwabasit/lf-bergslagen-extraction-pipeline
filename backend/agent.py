@@ -7,7 +7,14 @@ from .agents.fraud_dispute_agent import (
     run_fraud_dispute_agent,
     wants_fraud_or_dispute,
 )
-from .agents.mortgage_agent import mortgage_flow_resolved, run_mortgage_agent, wants_mortgage_application
+from .agents.mortgage_agent import (
+    loan_offer_flow_resolved,
+    loan_promise_flow_resolved,
+    run_loan_offer_agent,
+    run_loan_promise_agent,
+    wants_loan_offer_application,
+    wants_loan_promise_application,
+)
 from .knowledge import LF_PAGES, SERVICE_PROVIDERS
 from .link_safety import URL_RE, strip_unverified_links as _strip_unverified_links
 from .llm_client import client
@@ -136,11 +143,38 @@ about the insurance policy as if LF Bergslagen does the physical work itself. Th
 3. If the tool says no partner is listed in their exact town, say so plainly and share the
    nearest one it found instead of hiding the substitution.
 
+MORTGAGE ROADMAP IN SWEDEN: whenever the user is thinking about, currently searching for,
+or has already bought a home, ground your mortgage advice in the real three-step process
+(fetch_lf_page("home_loan") for the details) and be explicit about which step applies to
+them right now:
+1. Loan indication (get a rough number yourself) — a free, self-service calculator on LF
+   Bergslagen's mortgage page. Point the user to it (the page's own URL, cited inline) as
+   soon as they're even considering it — no application, no commitment, just a number to
+   plan around.
+2. Loan Promise (Lånelöfte) — once the user is actively house-hunting, this is the
+   concrete next step: an income-based statement of how much they could likely borrow,
+   valid for 3 months, that sellers/estate agents expect before taking a bid seriously.
+   It does NOT require a specific property yet. If the user wants to start this, tell them
+   plainly they can say so right here in this chat (e.g. "I'd like to apply for a loan
+   promise") and you'll connect them with the mortgage specialist to run it — don't try to
+   run the application yourself.
+3. Loan Offer — once the user has won a bidding or signed a purchase agreement for a
+   specific property, this is the step that turns their Loan Promise into a firm mortgage
+   offer tied to that property. If the user is at this stage, tell them they can say so
+   here in this chat (e.g. "I'd like to apply for a loan offer") to be connected with the
+   mortgage specialist.
+Immediate priorities depend on stage: someone just starting to look should prioritize the
+loan indication now and the Loan Promise before they start bidding seriously (insurance and
+the rest of the checklist below can wait); someone who has already bought should prioritize
+the Loan Offer application first, since financing needs to close before or alongside the
+other purchase steps.
+
 HOME PURCHASE CHECKLIST: once you know the user is actually buying or has bought a home
 (not just wondering about it — see the clarifying-question rule above), don't limit your
 advice to home insurance alone. The full set of things a home buyer typically needs to
 sort out is:
-1. Mortgage (bolån) — fetch_lf_page("home_loan").
+1. Mortgage (bolån) — fetch_lf_page("home_loan"); see MORTGAGE ROADMAP above for which of
+   the three mortgage steps applies to their stage.
 2. Home insurance (hemförsäkring) — fetch_lf_page("home_insurance").
 3. Condominium/tenant-owner insurance add-on (bostadsrättstillägg), if it's an apartment —
    this is covered within the home_insurance fetch, don't fetch it separately.
@@ -543,8 +577,11 @@ def run_agent(history: list[dict], lang: str | None = None) -> tuple[str, list[s
         reply, suggestions, extra = contact_menu_response(lang)
         return reply, suggestions, extra
 
-    if wants_mortgage_application(history) and not mortgage_flow_resolved(history):
-        return run_mortgage_agent(history, lang)
+    if wants_loan_promise_application(history) and not loan_promise_flow_resolved(history):
+        return run_loan_promise_agent(history, lang)
+
+    if wants_loan_offer_application(history) and not loan_offer_flow_resolved(history):
+        return run_loan_offer_agent(history, lang)
 
     fraud_or_dispute = wants_fraud_or_dispute(history)
     if fraud_or_dispute and not fraud_dispute_flow_resolved(history):
