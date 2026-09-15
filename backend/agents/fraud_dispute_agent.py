@@ -16,7 +16,7 @@ agent (see backend/audit.py)."""
 
 import re
 
-from .. import audit, cs_client
+from .. import audit, cs_client, verified_customer
 from ..knowledge import MOCK_CUSTOMERS
 
 FRAUD_KEYWORDS = [
@@ -288,6 +288,7 @@ def run_fraud_dispute_agent(history: list[dict], lang: str | None, case_type: st
         return t["not_verified"], [], {"form": IDENTITY_FORM}
 
     if not _transactions_already_shown(history):
+        verified_customer.mark_verified(customer["customer_id"])
         audit.record_event(
             agent="fraud_dispute_agent", action="verify_identity", customer_id=customer["customer_id"],
             decision="VERIFIED", details={"case_type": case_type},

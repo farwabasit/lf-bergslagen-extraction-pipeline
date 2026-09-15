@@ -45,6 +45,7 @@ const I18N = {
     speechLang: "en-US",
     rateLabel: "How helpful was this chat?",
     rateThanks: "Thanks for your feedback!",
+    offersHeading: "You might also be interested in",
     topicPrompt: "Not sure where to start? Choose a topic",
     chips: [
       { label: "Buying a house", text: "I'd like help with buying a house" },
@@ -85,6 +86,7 @@ const I18N = {
     speechLang: "sv-SE",
     rateLabel: "Hur hjälpsam var den här chatten?",
     rateThanks: "Tack för din feedback!",
+    offersHeading: "Detta kan också intressera dig",
     topicPrompt: "Osäker på var du ska börja? Välj ett ämne",
     chips: [
       { label: "Köpa hus", text: "Jag skulle vilja ha hjälp med att köpa hus" },
@@ -557,6 +559,53 @@ function addSuggestions(suggestions, humanChatOption) {
   messagesEl.scrollTop = messagesEl.scrollHeight;
 }
 
+// --- Next Best Action offer cards: shown right after the backend has just
+// identity-verified the customer (see backend/verified_customer.py) and
+// picked a handful of relevant offers (backend/nba_engine.py). Clicking
+// "Learn more" opens the real LF Bergslagen page AND reports the click back
+// so the underlying bandit model learns from it - see /api/offers/click. ---
+function addOffers(offers, customerId) {
+  if (!offers || !offers.length || !customerId) return;
+
+  const wrapper = document.createElement("div");
+  wrapper.className = "offers-wrapper";
+
+  const heading = document.createElement("div");
+  heading.className = "offers-heading";
+  heading.textContent = t().offersHeading;
+  wrapper.appendChild(heading);
+
+  const row = document.createElement("div");
+  row.className = "offers-row";
+
+  for (const offer of offers) {
+    const card = document.createElement("div");
+    card.className = "offer-card";
+    card.innerHTML = `
+      <img class="offer-card-image" src="${offer.image}" alt="${escapeHtml(offer.category)}" />
+      <div class="offer-card-body">
+        <span class="offer-card-category">${escapeHtml(offer.category)}</span>
+        <h4 class="offer-card-title">${escapeHtml(offer.title)}</h4>
+        <p class="offer-card-teaser">${escapeHtml(offer.teaser)}</p>
+        <a class="offer-card-cta" href="${offer.cta_url || '#'}" target="_blank" rel="noopener noreferrer">${escapeHtml(offer.cta_label)}</a>
+      </div>
+    `;
+    const cta = card.querySelector(".offer-card-cta");
+    cta.addEventListener("click", () => {
+      fetch("/api/offers/click", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ customer_id: customerId, offer_code: offer.code }),
+      }).catch((err) => console.error(err));
+    });
+    row.appendChild(card);
+  }
+
+  wrapper.appendChild(row);
+  messagesEl.appendChild(wrapper);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
 // --- Inline structured form (e.g. fraud/dispute follow-up questions) ---
 //
 // The backend can't reliably free-parse an answer to "suspected place of
@@ -735,6 +784,7 @@ async function getAssistantReply() {
     upsertChatListEntry();
     addSuggestions(data.suggestions, data.human_chat_option);
     addForm(data.form);
+    addOffers(data.offers, data.offers_customer_id);
     showRatingBar();
   } catch (err) {
     pending.textContent = t().chatError;

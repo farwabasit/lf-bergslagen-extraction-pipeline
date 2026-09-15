@@ -5,7 +5,7 @@ from urllib.parse import urljoin
 import requests
 from bs4 import BeautifulSoup
 
-from . import cs_client
+from . import cs_client, verified_customer
 from .knowledge import LF_PAGES, MOCK_CUSTOMERS, SERVICE_PROVIDERS
 
 BROWSER_HEADERS = {
@@ -211,6 +211,7 @@ def verify_customer_identity(name: str, personnummer: str, dob: str) -> str:
             dob_digits == record_dob_digits or record_pnr_digits.startswith(dob_digits)
         )
         if name_matches and pnr_matches and dob_matches:
+            verified_customer.mark_verified(customer["customer_id"])
             return f"VERIFIED\ncustomer_id: {customer['customer_id']}\nname: {customer['name']}"
 
     return (
