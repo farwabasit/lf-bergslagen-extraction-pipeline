@@ -1,4 +1,5 @@
 import re
+import unicodedata
 from pathlib import Path
 from urllib.parse import urljoin
 
@@ -6,7 +7,13 @@ import requests
 from bs4 import BeautifulSoup
 
 from . import cs_client
-from .knowledge import LF_PAGES, MOCK_CUSTOMERS, SERVICE_PROVIDERS
+from .knowledge import BOOLI_URL, LF_PAGES, MOCK_CUSTOMERS, SERVICE_PROVIDERS
+
+# Towns LF Bergslagen actually serves (same list SERVICE_PROVIDERS uses for
+# its local claim partners) - reused here so home-search guidance can tell a
+# customer plainly whether LF Bergslagen is even the right regional insurer
+# for the place they're looking, rather than assuming it always is.
+LF_BERGSLAGEN_TOWNS = {city for providers in SERVICE_PROVIDERS.values() for city in {p["city"] for p in providers}}
 
 BROWSER_HEADERS = {
     "User-Agent": (
@@ -168,8 +175,8 @@ def find_service_provider(category: str, location: str) -> str:
     if not providers:
         return f"Unknown service category '{category}'. Valid categories: {', '.join(SERVICE_PROVIDERS)}"
 
-    location_norm = (location or "").strip().lower()
-    match = next((p for p in providers if p["city"].lower() in location_norm or location_norm in p["city"].lower()), None)
+    location_norm = _fold(location)
+    match = next((p for p in providers if _fold(p["city"]) in location_norm or location_norm in _fold(p["city"])), None)
     provider = match or providers[0]
     note = "" if match else (
         f" No partner is listed in {location.strip()} itself, so this is the nearest one in the network:"
@@ -185,6 +192,58 @@ def find_service_provider(category: str, location: str) -> str:
         "(e.g. pickup/delivery or repair is coordinated between them and LF Bergslagen)."
     )
 
+
+
+def _fold(text: str) -> str:
+    """Lowercase and strip diacritics (Örebro -> orebro) so a town match
+    doesn't depend on whether the customer/model typed Swedish characters -
+    "Orebro" and "Malmo" are common ASCII spellings of "Örebro"/"Malmö"."""
+    decomposed = unicodedata.normalize("NFKD", (text or "").strip().lower())
+    return "".join(c for c in decomposed if not unicodedata.combining(c))
+
+
+def _in_lf_bergslagen_area(location: str) -> bool:
+    location_norm = _fold(location)
+    return any(_fold(town) in location_norm or location_norm in _fold(town) for town in LF_BERGSLAGEN_TOWNS)
+
+
+def find_home_search_link(location: str, property_type: str = "", price_range: str = "") -> str:
+    """Point the customer at Booli.se - Sweden's largest home-search site -
+    for actual apartment/villa listings. Booli.se's live search results can't
+    be fetched into this chat (they block automated requests), so this never
+    invents specific listings or a guessed deep link - only the site's real,
+    verified homepage URL, plus plain instructions for what to search/filter
+    for there. Also reports whether the location falls inside LF Bergslagen's
+    own service area, so the agent can be straight about insurance."""
+    location = (location or "").strip()
+    filters = []
+    if property_type:
+        filters.append(property_type)
+    if price_range:
+        filters.append(f"in the {price_range} range")
+    filter_clause = f", filtering for {' '.join(filters)}" if filters else ""
+    location_clause = f' Search for "{location}"{filter_clause} once you\'re there.' if location else ""
+
+    in_area = _in_lf_bergslagen_area(location) if location else None
+    if in_area is True:
+        area_note = f"{location} is inside LF Bergslagen's own service area, so their home insurance applies there."
+    elif in_area is False:
+        area_note = (
+            f"{location} is outside LF Bergslagen's own service area (they cover the "
+            "Örebro/Bergslagen region) - a different regional Länsförsäkringar company would "
+            "be the one to actually insure a home there, though LF Bergslagen's home insurance "
+            "page is still useful as general information on what to expect."
+        )
+    else:
+        area_note = "Once you know the town, I can say whether LF Bergslagen's own home insurance applies there."
+
+    return (
+        f"Booli.se ({BOOLI_URL}) is Sweden's largest home-search site, covering apartments, "
+        f"villas, and more all across the country.{location_clause} Live listing data can't be "
+        "pulled directly into this chat (booli.se blocks automated access), so Booli's own site "
+        "is the real place to see what's actually on the market right now.\n"
+        f"{area_note}"
+    )
 
 
 def _digits_only(value: str) -> str:

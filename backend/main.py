@@ -26,6 +26,24 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.middleware("http")
+async def no_cache_frontend(request, call_next):
+    """Without this, a browser can end up with an updated style.css/app.js
+    but a stale cached index.html (or vice versa) after a frontend change -
+    each file revalidates independently, so a page reload doesn't guarantee
+    a *consistent* set. That mismatch is exactly what produced a real bug
+    once: a leftover flex rule from new CSS applied to old HTML markup
+    ballooned a button's height. `no-cache` forces every frontend file to
+    revalidate with the server on each load (still fast via 304s - this
+    doesn't disable caching, just the "trust it without asking" part), so
+    the files in a page load are always from the same version."""
+    response = await call_next(request)
+    if not request.url.path.startswith("/api"):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 
 MAX_UPLOAD_BYTES = 5 * 1024 * 1024

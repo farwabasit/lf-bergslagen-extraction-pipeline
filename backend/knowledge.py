@@ -1,3 +1,11 @@
+# Booli.se is Sweden's largest home-search site. Its search results can't be
+# fetched live like LF_PAGES below - booli.se blocks automated requests
+# (confirmed: Cloudflare returns 403 to every request, and their own
+# robots.txt disallows "/" for all crawlers) - so this is the one Booli fact
+# the app ever cites: a stable, unquestionably-real homepage URL, never a
+# guessed deep link or query string. See find_home_search_link in tools.py.
+BOOLI_URL = "https://www.booli.se"
+
 # Whitelisted LF Bergslagen pages. The agent can only fetch one of these topics
 # (never an arbitrary URL), which keeps the live-fetch tool safe and scoped.
 LF_PAGES = {

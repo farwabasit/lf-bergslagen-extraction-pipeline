@@ -62,6 +62,14 @@ body {
   overflow-y: auto;
 }
 
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
 .new-chat-btn {
   background: var(--lf-blue);
   color: white;
@@ -71,7 +79,56 @@ body {
   font-weight: 600;
   font-size: 13.5px;
   cursor: pointer;
-  margin-bottom: 10px;
+}
+
+/* Claude-style collapse: hide the previous-chats sidebar entirely and let
+   the chat column reclaim that width (see the wider max-width rule below),
+   with a "show sidebar" button appearing in the topbar to bring it back. */
+.sidebar-toggle-btn {
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  font-size: 15px;
+  line-height: 1;
+  padding: 0;
+  height: 36px;
+  width: 36px;
+}
+
+.sidebar-toggle-btn:hover {
+  background: #eef3f8;
+  color: var(--lf-blue-dark);
+}
+
+.topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.topbar-sidebar-toggle {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.4);
+  color: white;
+}
+
+.topbar-sidebar-toggle:hover {
+  background: rgba(255, 255, 255, 0.22);
+  color: white;
+}
+
+body.sidebar-collapsed .sidebar {
+  display: none;
+}
+
+body.sidebar-collapsed #sidebar-show-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .new-chat-btn:hover {
@@ -202,11 +259,19 @@ body {
   flex: 1;
   display: flex;
   flex-direction: column;
-  max-width: 720px;
+  max-width: 1500px;
   width: 100%;
   margin: 0 auto;
-  padding: 16px;
+  padding: 16px 32px;
   min-height: 0;
+  transition: max-width 0.2s ease;
+}
+
+/* Hiding the previous-chats sidebar (see .sidebar-toggle-btn above) frees
+   up real width, not just blank space - let the chat column fill all of
+   it rather than leaving the freed area empty. */
+body.sidebar-collapsed .chat-shell {
+  max-width: none;
 }
 
 .chat-shell.drag-over {
@@ -225,7 +290,7 @@ body {
 }
 
 .msg {
-  max-width: 80%;
+  max-width: min(760px, 80%);
   padding: 12px 14px;
   border-radius: 12px;
   line-height: 1.45;
@@ -553,7 +618,7 @@ body {
   flex-wrap: wrap;
   gap: 8px;
   align-self: flex-start;
-  max-width: 80%;
+  max-width: min(760px, 80%);
   margin-top: -4px;
 }
 
@@ -573,7 +638,7 @@ body {
 
 .inline-form {
   align-self: flex-start;
-  max-width: 85%;
+  max-width: min(600px, 85%);
   background: white;
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -827,11 +892,20 @@ body.widget-compact .sidebar {
   display: none;
 }
 
+/* No room for a sidebar at all in the small embedded-widget bubble (see the
+   comment above), so don't offer a "show sidebar" toggle there either. */
+body.widget-compact #sidebar-show-btn {
+  display: none !important;
+}
+
 @media (max-width: 640px) {
   .sidebar {
     width: 84px;
     min-width: 84px;
     padding: 8px 6px;
+  }
+  .sidebar-header {
+    flex-direction: column;
   }
   .new-chat-btn {
     font-size: 0;
@@ -840,6 +914,9 @@ body.widget-compact .sidebar {
   .new-chat-btn::before {
     content: "+";
     font-size: 18px;
+  }
+  #sidebar-hide-btn {
+    width: 100%;
   }
   .chat-item {
     font-size: 11px;

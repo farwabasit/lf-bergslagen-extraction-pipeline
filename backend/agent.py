@@ -21,6 +21,7 @@ from .llm_client import client
 from .suggestions import generate_suggestions
 from .tools import (
     fetch_lf_page,
+    find_home_search_link,
     find_service_provider,
     get_case_status,
     get_customer_portfolio,
@@ -144,9 +145,11 @@ about the insurance policy as if LF Bergslagen does the physical work itself. Th
    nearest one it found instead of hiding the substitution.
 
 MORTGAGE ROADMAP IN SWEDEN: whenever the user is thinking about, currently searching for,
-or has already bought a home, ground your mortgage advice in the real three-step process
+or has already bought a home, ground your mortgage advice in the real four-step process
 (fetch_lf_page("home_loan") for the details) and be explicit about which step applies to
 them right now:
+0. Finding the home itself — see HOME SEARCH below (find_home_search_link). Relevant for
+   anyone who hasn't already found/bought a specific property yet.
 1. Loan indication (get a rough number yourself) — a free, self-service calculator on LF
    Bergslagen's mortgage page. Point the user to it (the page's own URL, cited inline) as
    soon as they're even considering it — no application, no commitment, just a number to
@@ -163,18 +166,36 @@ them right now:
    offer tied to that property. If the user is at this stage, tell them they can say so
    here in this chat (e.g. "I'd like to apply for a loan offer") to be connected with the
    mortgage specialist.
-Immediate priorities depend on stage: someone just starting to look should prioritize the
-loan indication now and the Loan Promise before they start bidding seriously (insurance and
-the rest of the checklist below can wait); someone who has already bought should prioritize
-the Loan Offer application first, since financing needs to close before or alongside the
-other purchase steps.
+Immediate priorities depend on stage: someone just starting to look should prioritize
+finding real listings and the loan indication now, and the Loan Promise before they start
+bidding seriously (insurance and the rest of the checklist below can wait); someone who has
+already bought should prioritize the Loan Offer application first, since financing needs to
+close before or alongside the other purchase steps.
+
+HOME SEARCH: whenever the user asks what apartments/villas are available, wants ideas
+within a price range, or otherwise wants to browse actual homes on the market, you cannot
+see live listings yourself — booli.se (Sweden's largest home-search site) blocks automated
+access, so there is no way to fetch or invent real listing data. Handle it honestly:
+1. If you don't already know which town/area they're looking in, ask for it first — don't
+   call find_home_search_link with a guessed location.
+2. Once you know it, call find_home_search_link with that location (and the property type
+   and/or price range if the user mentioned them) in the SAME reply as step 3 below. Share
+   its real URL inline as a markdown link, and pass along its guidance on what to search
+   and filter for on Booli's own site — never describe specific listings, prices, or
+   addresses as if they're real, since none of that data reached you.
+3. In that same reply, also call fetch_lf_page("home_insurance") and tell the user plainly
+   whether LF Bergslagen's own home insurance applies to what they're looking at — the
+   find_home_search_link result tells you whether their location is inside LF Bergslagen's
+   service area; pass that fact along honestly rather than assuming it always applies.
+   Mention bostadsrättstillägg for an apartment/bostadsrätt, same as in the checklist below.
 
 HOME PURCHASE CHECKLIST: once you know the user is actually buying or has bought a home
 (not just wondering about it — see the clarifying-question rule above), don't limit your
 advice to home insurance alone. The full set of things a home buyer typically needs to
 sort out is:
 1. Mortgage (bolån) — fetch_lf_page("home_loan"); see MORTGAGE ROADMAP above for which of
-   the three mortgage steps applies to their stage.
+   the four steps applies to their stage (including finding the home itself via
+   find_home_search_link, if they haven't settled on a property yet).
 2. Home insurance (hemförsäkring) — fetch_lf_page("home_insurance").
 3. Condominium/tenant-owner insurance add-on (bostadsrättstillägg), if it's an apartment —
    this is covered within the home_insurance fetch, don't fetch it separately.
@@ -317,6 +338,27 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "find_home_search_link",
+            "description": (
+                "Point the customer to Booli.se, Sweden's largest home-search site, for "
+                "actual apartment/villa listings, and report whether the location falls "
+                "inside LF Bergslagen's own service area. Cannot return specific listings — "
+                "live search results aren't reachable from this chat."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "location": {"type": "string", "description": "The town/area the customer is looking in."},
+                    "property_type": {"type": "string", "description": "e.g. apartment, villa, if the customer mentioned one."},
+                    "price_range": {"type": "string", "description": "e.g. '3-4 million SEK', if the customer mentioned one."},
+                },
+                "required": ["location"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "verify_customer_identity",
             "description": (
                 "Verify a customer's identity by name, personnummer, and date of birth "
@@ -446,6 +488,30 @@ def _home_purchase_stage_unclear(history: list[dict]) -> bool:
     mentions_home_purchase = any(kw in text for kw in HOME_PURCHASE_KEYWORDS)
     mentions_stage = any(kw in text for kw in HOME_STAGE_INDICATOR_KEYWORDS)
     return mentions_home_purchase and not mentions_stage
+
+
+# Two word-lists, AND-matched, rather than exact phrases - a customer can ask
+# "what apartments or villas are available" or "any villas available right
+# now" and both should fire, which a brittle list of fixed phrases (e.g. only
+# "villas available") would miss. Deliberately excludes bare "home"/"bostad"
+# from the property-word list - "home insurance"/"home loan" would otherwise
+# false-positive alongside "available".
+HOME_SEARCH_PROPERTY_WORDS = [
+    "apartment", "apartments", "villa", "villas", "house", "houses",
+    "lägenhet", "lägenheter", "villor", "hus",
+]
+HOME_SEARCH_INTENT_WORDS = [
+    "available", "for sale", "on the market", "price range", "browse", "find a",
+    "find me", "show me", "what's out there", "some idea", "some options",
+    "look for", "looking for",
+    "tillgängliga", "till salu", "prisintervall", "hitta ett", "hitta en", "visa mig",
+]
+
+
+def _wants_home_search(history: list[dict]) -> bool:
+    last_user = next((m.get("content", "") for m in reversed(history) if m.get("role") == "user"), "")
+    text = last_user.lower()
+    return any(w in text for w in HOME_SEARCH_PROPERTY_WORDS) and any(w in text for w in HOME_SEARCH_INTENT_WORDS)
 
 
 def _detect_service_category(history: list[dict]) -> str | None:
@@ -640,6 +706,24 @@ def run_agent(history: list[dict], lang: str | None = None) -> tuple[str, list[s
             }
         )
 
+    if _wants_home_search(history):
+        messages.append(
+            {
+                "role": "system",
+                "content": (
+                    "The user wants ideas of actual apartments/villas on the market - see HOME "
+                    "SEARCH in your instructions. You cannot see live listings; never invent "
+                    "specific ones. If you don't already know their town/area from this "
+                    "conversation, ask for it now and don't call find_home_search_link yet. If "
+                    "you do know it, call find_home_search_link this turn with that location "
+                    "(plus property_type/price_range if they mentioned them), AND call "
+                    "fetch_lf_page(\"home_insurance\") in the same reply, then tell them plainly "
+                    "whether LF Bergslagen's own insurance applies there, per find_home_search_"
+                    "link's result."
+                ),
+            }
+        )
+
     identity_flow = _detect_identity_flow(history)
     if identity_flow and not _identity_flow_resolved(history):
         messages.append(
@@ -698,6 +782,7 @@ def run_agent(history: list[dict], lang: str | None = None) -> tuple[str, list[s
         or (_detect_identity_flow(history) and not _identity_flow_resolved(history))
         or (_wants_callback(history) and not _callback_already_resolved(history))
         or _wants_case_status(history)
+        or _wants_home_search(history)
     )
 
     seen_urls: set[str] = set()
@@ -766,6 +851,11 @@ def run_agent(history: list[dict], lang: str | None = None) -> tuple[str, list[s
                 )
             elif name == "get_case_status":
                 result = get_case_status(args.get("case_id", ""))
+            elif name == "find_home_search_link":
+                result = find_home_search_link(
+                    args.get("location", ""), args.get("property_type", ""), args.get("price_range", "")
+                )
+                seen_urls.update(URL_RE.findall(result))
             else:
                 topic = args.get("topic", "")
                 result = fetch_lf_page(topic)

@@ -8,11 +8,14 @@
 </head>
 <body>
   <header class="topbar">
-    <div class="brand" id="home-btn" role="button" tabindex="0" title="Start a new chat">
-      <span class="avatar avatar-ai">S</span>
-      <div class="brand-text">
-        <span class="brand-name">Sara</span>
-        <span class="brand-sub">Digital assistant · LF Bergslagen</span>
+    <div class="topbar-left">
+      <button id="sidebar-show-btn" class="sidebar-toggle-btn topbar-sidebar-toggle" type="button" title="Show previous chats" hidden>☰</button>
+      <div class="brand" id="home-btn" role="button" tabindex="0" title="Start a new chat">
+        <span class="avatar avatar-ai">S</span>
+        <div class="brand-text">
+          <span class="brand-name">Sara</span>
+          <span class="brand-sub">Digital assistant · LF Bergslagen</span>
+        </div>
       </div>
     </div>
     <div class="header-actions">
@@ -26,7 +29,10 @@
 
   <div class="app-shell">
     <aside class="sidebar">
-      <button id="new-chat-btn" class="new-chat-btn" type="button">+ New chat</button>
+      <div class="sidebar-header">
+        <button id="new-chat-btn" class="new-chat-btn" type="button">+ New chat</button>
+        <button id="sidebar-hide-btn" class="sidebar-toggle-btn" type="button" title="Hide previous chats">‹</button>
+      </div>
       <div id="chat-list" class="chat-list"></div>
     </aside>
 

@@ -14,6 +14,8 @@ const sendBtn = document.getElementById("send-btn");
 const homeBtn = document.getElementById("home-btn");
 const newChatBtn = document.getElementById("new-chat-btn");
 const chatListEl = document.getElementById("chat-list");
+const sidebarHideBtn = document.getElementById("sidebar-hide-btn");
+const sidebarShowBtn = document.getElementById("sidebar-show-btn");
 const chatShellEl = document.querySelector(".chat-shell");
 const ratingBarEl = document.getElementById("rating-bar");
 const ratingLabelEl = document.getElementById("rating-label");
@@ -37,6 +39,8 @@ const I18N = {
     agentJoinedSuffix: "has joined the chat and will respond shortly.",
     attachTitle: "Attach a document",
     micTitle: "Speak instead of typing",
+    sidebarHideTitle: "Hide previous chats",
+    sidebarShowTitle: "Show previous chats",
     supportLabel: "LF Bergslagen · Support",
     aiLabel: "Sara · AI assistant",
     thinking: "Thinking...",
@@ -77,6 +81,8 @@ const I18N = {
     agentJoinedSuffix: "har anslutit till chatten och svarar snart.",
     attachTitle: "Bifoga ett dokument",
     micTitle: "Prata istället för att skriva",
+    sidebarHideTitle: "Dölj tidigare chattar",
+    sidebarShowTitle: "Visa tidigare chattar",
     supportLabel: "LF Bergslagen · Support",
     aiLabel: "Sara · AI-assistent",
     thinking: "Tänker...",
@@ -125,6 +131,8 @@ function applyLanguage(lang) {
   humanBtn.textContent = strings.humanBtn;
   attachBtn.title = strings.attachTitle;
   micBtn.title = strings.micTitle;
+  sidebarHideBtn.title = strings.sidebarHideTitle;
+  sidebarShowBtn.title = strings.sidebarShowTitle;
   if (!ratingSubmitted) ratingLabelEl.textContent = strings.rateLabel;
 
   chipsEl.innerHTML = "";
@@ -1220,6 +1228,19 @@ homeBtn.addEventListener("keydown", (e) => {
   }
 });
 newChatBtn.addEventListener("click", startNewChat);
+
+// --- Sidebar collapse: hides the previous-chats list and widens the chat
+// column into the freed space (see body.sidebar-collapsed rules in
+// style.css), similar to collapsing the left nav in Claude's UI. Persisted
+// so the choice survives a reload. ---
+function setSidebarCollapsed(collapsed) {
+  document.body.classList.toggle("sidebar-collapsed", collapsed);
+  sidebarShowBtn.hidden = !collapsed;
+  localStorage.setItem("ltn-sidebar-collapsed", collapsed ? "1" : "");
+}
+sidebarHideBtn.addEventListener("click", () => setSidebarCollapsed(true));
+sidebarShowBtn.addEventListener("click", () => setSidebarCollapsed(false));
+setSidebarCollapsed(localStorage.getItem("ltn-sidebar-collapsed") === "1");
 
 applyLanguage(currentLang);
 renderChatList();
