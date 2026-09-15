@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
@@ -5,10 +6,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import audit, cs_client
+from . import audit, cs_client, metrics
 from .agent import run_agent
 from .sessions import sessions
+from .topic_classifier import classify_topic
 from .uploads import extract_text
+
+CASE_ID_RE = re.compile(r"CASE-\d{6}")
 
 app = FastAPI(title="Life Transition Navigator")
 
@@ -65,6 +69,10 @@ class AssignAgent(BaseModel):
     agent_name: str
 
 
+class RatingRequest(BaseModel):
+    rating: int
+
+
 @app.post("/api/chat")
 def chat(req: ChatRequest) -> dict:
     history = [m.model_dump() for m in req.messages]
@@ -73,6 +81,15 @@ def chat(req: ChatRequest) -> dict:
     if req.session_id and history:
         sessions.add_message(req.session_id, "user", history[-1]["content"])
         sessions.add_message(req.session_id, "assistant", reply)
+
+    case_match = CASE_ID_RE.search(reply)
+    metrics.record_interaction(
+        session_id=req.session_id,
+        topic=classify_topic(history),
+        lang=req.lang,
+        case_created=bool(case_match),
+        case_id=case_match.group(0) if case_match else None,
+    )
 
     return {"role": "assistant", "content": reply, "suggestions": suggestions, **extra}
 
@@ -108,7 +125,20 @@ def request_human(session_id: str) -> dict:
     customer_summary = first_user_msg[:80] if first_user_msg else "Customer chat"
     notified = cs_client.notify_chat_request(session_id, customer_summary, transcript)
 
+    metrics.record_handoff(session_id, classify_topic(transcript))
+
     return {"ok": True, "cs_app_notified": notified}
+
+
+@app.post("/api/sessions/{session_id}/rating")
+def rate_session(session_id: str, body: RatingRequest) -> dict:
+    """Customer satisfaction rating for the AI Hub dashboard - 1 to 5,
+    submitted from the chat widget at any point in (or after) a conversation.
+    Not required, not forced - just recorded if given."""
+    if body.rating < 1 or body.rating > 5:
+        raise HTTPException(status_code=422, detail="rating must be between 1 and 5")
+    metrics.record_rating(session_id, body.rating)
+    return {"ok": True}
 
 
 @app.get("/api/sessions/{session_id}/poll")
@@ -154,6 +184,15 @@ def get_session(session_id: str) -> dict:
 def send_human_message(session_id: str, body: HumanMessage) -> dict:
     count = sessions.add_message(session_id, "human", body.content, agent_name=body.agent_name)
     return {"ok": True, "message_count": count}
+
+
+@app.get("/api/metrics/summary")
+def get_metrics_summary(days: int = 14) -> dict:
+    """Everything the AI Hub monitoring dashboard renders - interaction
+    volumes, topics, handoffs, cases, satisfaction, and token consumption.
+    Demo-only: a real deployment would put real access control (internal
+    AI Hub staff only) in front of this endpoint, same caveat as /api/audit."""
+    return metrics.build_summary(days=days)
 
 
 @app.get("/api/audit/verify")

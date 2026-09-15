@@ -15,6 +15,9 @@ const homeBtn = document.getElementById("home-btn");
 const newChatBtn = document.getElementById("new-chat-btn");
 const chatListEl = document.getElementById("chat-list");
 const chatShellEl = document.querySelector(".chat-shell");
+const ratingBarEl = document.getElementById("rating-bar");
+const ratingLabelEl = document.getElementById("rating-label");
+const ratingStarsEl = document.getElementById("rating-stars");
 
 // The toggle sets the UI language and is a fallback for ambiguous messages,
 // but the backend still matches whatever language the user actually types
@@ -40,6 +43,8 @@ const I18N = {
     uploadError: "Couldn't read one of those files. Try files under 5MB each.",
     chatError: "Something went wrong reaching the navigator. Please try again.",
     speechLang: "en-US",
+    rateLabel: "How helpful was this chat?",
+    rateThanks: "Thanks for your feedback!",
     topicPrompt: "Not sure where to start? Choose a topic",
     chips: [
       { label: "Buying a house", text: "I'd like help with buying a house" },
@@ -78,6 +83,8 @@ const I18N = {
     uploadError: "Kunde inte läsa en av filerna. Prova filer under 5 MB styck.",
     chatError: "Något gick fel. Försök igen.",
     speechLang: "sv-SE",
+    rateLabel: "Hur hjälpsam var den här chatten?",
+    rateThanks: "Tack för din feedback!",
     topicPrompt: "Osäker på var du ska börja? Välj ett ämne",
     chips: [
       { label: "Köpa hus", text: "Jag skulle vilja ha hjälp med att köpa hus" },
@@ -118,6 +125,7 @@ function applyLanguage(lang) {
   humanBtn.textContent = strings.humanBtn;
   attachBtn.title = strings.attachTitle;
   micBtn.title = strings.micTitle;
+  if (!ratingSubmitted) ratingLabelEl.textContent = strings.rateLabel;
 
   chipsEl.innerHTML = "";
   const dropdown = document.createElement("div");
@@ -162,6 +170,7 @@ langToggleEl.addEventListener("click", (e) => {
 
 let history = [];
 let stagedFiles = [];
+let ratingSubmitted = false; // this session already sent a satisfaction rating
 let sessionMessageCount = 0; // how many session-store messages we've already accounted for
 let humanHandoffActive = false; // once true, the composer talks to a human, not the AI
 let lastKnownAgent = null; // name of the CS agent assigned to this session, if any
@@ -641,6 +650,58 @@ function addForm(form) {
   messagesEl.scrollTop = messagesEl.scrollHeight;
 }
 
+// --- Satisfaction rating: a small, optional "how helpful was this chat"
+// star control. Never blocks the conversation - it just becomes visible
+// once there's been at least one reply, and can be clicked at any time. ---
+for (let n = 1; n <= 5; n++) {
+  const star = document.createElement("button");
+  star.type = "button";
+  star.className = "star-btn";
+  star.dataset.value = String(n);
+  star.textContent = "★";
+  star.title = `${n} / 5`;
+  ratingStarsEl.appendChild(star);
+}
+
+function paintStars(selected) {
+  ratingStarsEl.querySelectorAll(".star-btn").forEach((star) => {
+    star.classList.toggle("filled", Number(star.dataset.value) <= selected);
+  });
+}
+
+async function submitRating(value) {
+  if (ratingSubmitted) return;
+  ratingSubmitted = true;
+  paintStars(value);
+  ratingLabelEl.textContent = t().rateThanks;
+  try {
+    await fetch(`/api/sessions/${sessionId}/rating`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rating: value }),
+    });
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+ratingStarsEl.addEventListener("click", (e) => {
+  const star = e.target.closest(".star-btn");
+  if (!star) return;
+  submitRating(Number(star.dataset.value));
+});
+
+function showRatingBar() {
+  ratingBarEl.hidden = false;
+}
+
+function resetRatingWidget() {
+  ratingSubmitted = false;
+  ratingBarEl.hidden = true;
+  ratingLabelEl.textContent = t().rateLabel;
+  paintStars(0);
+}
+
 async function getAssistantReply() {
   const pending = addBubble("assistant pending", t().thinking, { label: t().aiLabel });
   inputEl.disabled = true;
@@ -674,6 +735,7 @@ async function getAssistantReply() {
     upsertChatListEntry();
     addSuggestions(data.suggestions, data.human_chat_option);
     addForm(data.form);
+    showRatingBar();
   } catch (err) {
     pending.textContent = t().chatError;
     pending.className = "msg assistant";
@@ -1055,6 +1117,7 @@ function resetChatView() {
   inputEl.style.height = "auto";
   humanBtn.disabled = false;
   humanBtn.textContent = t().humanBtn;
+  resetRatingWidget();
 
   applyLanguage(currentLang);
 }
@@ -1127,6 +1190,8 @@ async function loadChat(id) {
         });
       }
     }
+    resetRatingWidget();
+    if (history.some((m) => m.role === "assistant")) showRatingBar();
     renderChatList();
   } catch (err) {
     console.error(err);

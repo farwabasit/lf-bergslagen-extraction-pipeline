@@ -16,6 +16,15 @@
   box-sizing: border-box;
 }
 
+/* An author-stylesheet `display` rule (e.g. `.attachment-preview { display:
+   flex }`) beats the user-agent stylesheet's `[hidden] { display: none }`
+   rule regardless of selector specificity, because author-origin normal
+   rules always outrank user-agent-origin normal rules in the cascade. Any
+   element toggled via the `hidden` attribute needs this to actually hide. */
+[hidden] {
+  display: none !important;
+}
+
 body {
   margin: 0;
   font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
@@ -658,6 +667,42 @@ body {
 .speak-btn.speaking {
   color: var(--lf-red);
   opacity: 1;
+}
+
+.rating-bar {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  padding: 4px 2px;
+}
+
+.rating-label {
+  color: var(--text-muted);
+  font-size: 12.5px;
+}
+
+.rating-stars {
+  display: flex;
+}
+
+.star-btn {
+  background: none;
+  border: none;
+  color: var(--border);
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  padding: 2px;
+  transition: color 0.15s ease;
+}
+
+.star-btn:hover {
+  color: #f2b90c;
+}
+
+.star-btn.filled {
+  color: #f2b90c;
 }
 
 .composer {

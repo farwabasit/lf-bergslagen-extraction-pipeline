@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Hub — Sara Performance Dashboard</title>
+  <link rel="stylesheet" href="aihub-dashboard.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="avatar">AI</span>
+      <div class="brand-text">
+        <span class="brand-name">AI Hub — Sara Performance Dashboard</span>
+        <span class="brand-sub">LF Bergslagen · Digital assistant monitoring</span>
+      </div>
+    </div>
+    <div class="header-actions">
+      <span id="last-updated" class="last-updated">—</span>
+      <button id="refresh-btn" class="refresh-btn" type="button">Refresh</button>
+    </div>
+  </header>
+
+  <main class="shell">
+
+    <section class="section">
+      <h2 class="section-title">Customer interaction performance</h2>
+
+      <div class="stat-grid">
+        <div class="stat-card">
+          <div class="stat-label">Total interactions</div>
+          <div class="stat-value" id="stat-total-interactions">—</div>
+          <div class="stat-sub" id="stat-total-sessions">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Avg. time per interaction</div>
+          <div class="stat-value" id="stat-avg-duration">—</div>
+          <div class="stat-sub">first to last message in a session</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Needed a human agent</div>
+          <div class="stat-value" id="stat-handoff-pct">—</div>
+          <div class="stat-sub" id="stat-handoff-count">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Triggered a CS Workspace case</div>
+          <div class="stat-value" id="stat-cases-pct">—</div>
+          <div class="stat-sub" id="stat-cases-count">—</div>
+        </div>
+        <div class="stat-card stat-card-wide">
+          <div class="stat-label">Customer satisfaction</div>
+          <div class="stat-value" id="stat-satisfaction">—</div>
+          <div class="rating-stars-display" id="satisfaction-stars"></div>
+          <div class="stat-sub" id="stat-satisfaction-count">—</div>
+        </div>
+      </div>
+
+      <div class="panel-grid">
+        <div class="panel panel-wide">
+          <h3 class="panel-title">Interaction volume — last 14 days</h3>
+          <div id="volume-chart" class="bar-chart bar-chart-vertical"></div>
+        </div>
+
+        <div class="panel">
+          <h3 class="panel-title">Satisfaction distribution</h3>
+          <div id="satisfaction-chart" class="bar-chart bar-chart-vertical"></div>
+        </div>
+      </div>
+
+      <div class="panel-grid">
+        <div class="panel panel-wide">
+          <h3 class="panel-title">Topics covered</h3>
+          <div id="topics-chart" class="bar-chart bar-chart-horizontal"></div>
+        </div>
+
+        <div class="panel">
+          <h3 class="panel-title">Handoffs &amp; cases by topic</h3>
+          <div class="mini-list-group">
+            <div>
+              <h4 class="mini-list-title">Manual agent handoffs</h4>
+              <ul id="handoff-list" class="mini-list"></ul>
+            </div>
+            <div>
+              <h4 class="mini-list-title">CS Workspace cases</h4>
+              <ul id="cases-list" class="mini-list"></ul>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2 class="section-title">Agent performance — technical</h2>
+
+      <div class="stat-grid">
+        <div class="stat-card">
+          <div class="stat-label">Total LLM calls</div>
+          <div class="stat-value" id="stat-total-calls">—</div>
+          <div class="stat-sub" id="stat-models-used">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Avg. latency per call</div>
+          <div class="stat-value" id="stat-avg-latency">—</div>
+          <div class="stat-sub">wall-clock, per LLM round-trip</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Avg. tokens per call</div>
+          <div class="stat-value" id="stat-avg-tokens">—</div>
+          <div class="stat-sub">prompt + completion</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Audit chain integrity</div>
+          <div class="stat-value" id="stat-audit-integrity">—</div>
+          <div class="stat-sub" id="stat-audit-entries">—</div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3 class="panel-title">Token consumption</h3>
+        <table class="token-table">
+          <thead>
+            <tr>
+              <th>Period</th>
+              <th>LLM calls</th>
+              <th>Prompt tokens</th>
+              <th>Completion tokens</th>
+              <th>Total tokens</th>
+            </tr>
+          </thead>
+          <tbody id="token-table-body"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script src="aihub-dashboard.js"></script>
+</body>
+</html>

@@ -71,3 +71,26 @@ def calculate_loan_terms(
         details=result,
     )
     return result
+
+
+def max_loan_amount_for_payment(
+    annual_rate_percent: float,
+    max_monthly_payment_sek: float,
+    amortization_years: int = 50,
+) -> float:
+    """Inverse of calculate_loan_terms' annuity formula: given the biggest
+    monthly payment a customer can carry, returns the loan amount that
+    produces exactly that payment. Used by the Loan Promise (Lånelöfte) flow,
+    where there's no specific property yet to size the loan from - only an
+    income-based affordability ceiling."""
+    monthly_rate = (annual_rate_percent / 100) / 12
+    n_payments = amortization_years * 12
+
+    if monthly_rate == 0:
+        return max_monthly_payment_sek * n_payments
+
+    return (
+        max_monthly_payment_sek
+        * ((1 + monthly_rate) ** n_payments - 1)
+        / (monthly_rate * (1 + monthly_rate) ** n_payments)
+    )

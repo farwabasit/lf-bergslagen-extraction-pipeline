@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Audit History — LF Bergslagen</title>
+  <link rel="stylesheet" href="audit.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="avatar">CS</span>
+      <div class="brand-text">
+        <span class="brand-name">Audit History</span>
+        <span class="brand-sub">LF Bergslagen · Agent decision trail</span>
+      </div>
+    </div>
+    <div id="integrity-badge" class="integrity-badge">Checking integrity…</div>
+  </header>
+
+  <main class="shell">
+    <section class="summary-card">
+      <div>
+        <div class="summary-label">Customer ID</div>
+        <div id="customer-id" class="summary-value">—</div>
+      </div>
+      <div>
+        <div class="summary-label">Total actions</div>
+        <div id="event-count" class="summary-value">—</div>
+      </div>
+      <div class="summary-filter">
+        <label for="agent-filter">Filter by agent</label>
+        <select id="agent-filter">
+          <option value="">All agents</option>
+        </select>
+      </div>
+    </section>
+
+    <ol id="timeline" class="timeline">
+      <li class="empty-hint">Loading…</li>
+    </ol>
+  </main>
+
+  <script src="audit.js"></script>
+</body>
+</html>
