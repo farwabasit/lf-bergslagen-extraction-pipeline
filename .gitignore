@@ -8,6 +8,7 @@ venv/
 # Runtime-generated, not source
 backend/audit_log.jsonl
 backend/metrics_log.jsonl
+backend/nba.db
 
 # Local Java build tooling (downloaded, not part of the project)
 /tools/

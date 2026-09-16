@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import audit, cs_client, metrics
+from . import audit, cs_client, db, metrics, nba_engine, verified_customer
 from .agent import run_agent
 from .sessions import sessions
 from .topic_classifier import classify_topic
@@ -15,6 +15,7 @@ from .uploads import extract_text
 CASE_ID_RE = re.compile(r"CASE-\d{6}")
 
 app = FastAPI(title="Life Transition Navigator")
+db.init_db()
 
 # Lets the separate Customer Service (Java) app poll a session's transcript
 # directly from its own browser page after picking up a chat hand-off - a
@@ -91,9 +92,15 @@ class RatingRequest(BaseModel):
     rating: int
 
 
+class OfferClickRequest(BaseModel):
+    customer_id: str
+    offer_code: str
+
+
 @app.post("/api/chat")
 def chat(req: ChatRequest) -> dict:
     history = [m.model_dump() for m in req.messages]
+    verified_customer.get_and_clear()  # discard any stale value from an earlier request
     reply, suggestions, extra = run_agent(history, lang=req.lang)
 
     if req.session_id and history:
@@ -101,15 +108,35 @@ def chat(req: ChatRequest) -> dict:
         sessions.add_message(req.session_id, "assistant", reply)
 
     case_match = CASE_ID_RE.search(reply)
+    case_id = case_match.group(0) if case_match else None
+    topic = classify_topic(history)
     metrics.record_interaction(
-        session_id=req.session_id,
-        topic=classify_topic(history),
-        lang=req.lang,
-        case_created=bool(case_match),
-        case_id=case_match.group(0) if case_match else None,
+        session_id=req.session_id, topic=topic, lang=req.lang,
+        case_created=bool(case_match), case_id=case_id,
     )
 
+    # Next Best Action offers: only ever surfaced right after this exact
+    # turn identity-verified a customer (see verified_customer.py) - never
+    # for an unverified chat. Stored centrally (db.py) so "previous
+    # interactions" and "offers clicked/not clicked" persist across
+    # restarts and across everyone running this app, not just this process.
+    customer_id = verified_customer.get_and_clear()
+    if customer_id:
+        db.record_interaction(customer_id, req.session_id, topic, case_id)
+        offers = nba_engine.get_offers_for_customer(customer_id, topic)
+        if offers:
+            extra["offers"] = offers
+            extra["offers_customer_id"] = customer_id
+
     return {"role": "assistant", "content": reply, "suggestions": suggestions, **extra}
+
+
+@app.post("/api/offers/click")
+def click_offer(body: OfferClickRequest) -> dict:
+    ok = nba_engine.record_click(body.customer_id, body.offer_code)
+    if not ok:
+        raise HTTPException(status_code=404, detail=f"Unknown offer_code '{body.offer_code}'")
+    return {"ok": True}
 
 
 @app.post("/api/upload")
