@@ -112,6 +112,15 @@ def _public_fields(offer: dict) -> dict:
     }
 
 
+# How long a just-clicked offer is withheld from that same customer, even
+# if it would otherwise win the ranking again - clicking something is a
+# strong positive signal (already counted via alpha), not a request to see
+# it repeated in the very next chat. A short cooldown, not a permanent
+# suppression: the click itself isn't penalized, and the offer is eligible
+# again once this window passes.
+OFFER_CLICK_COOLDOWN_SECONDS = 120
+
+
 def get_offers_for_customer(customer_id: str, current_topic: str, top_n: int = 3) -> list[dict]:
     """Everything the frontend needs to render up to `top_n` offer cards.
     Also records an impression for each one returned - see the module
@@ -131,6 +140,9 @@ def get_offers_for_customer(customer_id: str, current_topic: str, top_n: int = 3
 
     if not eligible:
         eligible = [(o, "general") for o in OFFERS if "general" in o["segments"]]
+
+    recently_clicked = db.get_recently_clicked_offer_codes(customer_id, OFFER_CLICK_COOLDOWN_SECONDS)
+    eligible = [(offer, segment) for offer, segment in eligible if offer["code"] not in recently_clicked]
 
     scored = sorted(
         ((offer, segment, db.sample_offer_score(segment, offer["code"])) for offer, segment in eligible),

@@ -123,6 +123,28 @@ def get_customer_topics(customer_id: str, lookback_days: int = 180) -> set[str]:
         return {r[0] for r in rows}
 
 
+def get_recently_clicked_offer_codes(customer_id: str, within_seconds: int = 120) -> set[str]:
+    """Offer codes this customer clicked within the last `within_seconds` -
+    used to suppress re-showing the exact same offer right after they just
+    clicked it (e.g. they open a new chat a minute later). A short, fixed
+    cooldown rather than a permanent "never show again": the click is a
+    positive signal (already counted via alpha in offer_stats), not a
+    request to stop seeing it forever."""
+    since = datetime.now(timezone.utc) - timedelta(seconds=within_seconds)
+    with _session() as db:
+        rows = (
+            db.query(OfferEvent.offer_code)
+            .filter(
+                OfferEvent.customer_id == customer_id,
+                OfferEvent.event_type == "click",
+                OfferEvent.ts >= since,
+            )
+            .distinct()
+            .all()
+        )
+        return {r[0] for r in rows}
+
+
 def get_or_create_offer_stat(db: Session, segment: str, offer_code: str) -> OfferStat:
     stat = db.get(OfferStat, {"segment": segment, "offer_code": offer_code})
     if stat is None:

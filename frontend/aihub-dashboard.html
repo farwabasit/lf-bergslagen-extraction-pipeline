@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>AI Hub — Sara Performance Dashboard</title>
   <link rel="stylesheet" href="aihub-dashboard.css" />
+  <link rel="stylesheet" href="audit-render.css" />
 </head>
 <body>
   <header class="topbar">
@@ -131,8 +132,37 @@
         </table>
       </div>
     </section>
+
+    <section class="section">
+      <h2 class="section-title">Audit history</h2>
+      <p class="section-note">
+        For managers/auditors: a concise feed of interactions and the actions agents took on them.
+        Click any row for the full detail view.
+      </p>
+
+      <div class="panel">
+        <div class="panel-head-row">
+          <h3 class="panel-title">Recent agent actions</h3>
+          <select id="audit-agent-filter" class="audit-filter">
+            <option value="">All agents</option>
+          </select>
+        </div>
+        <div id="audit-history-list" class="audit-list"></div>
+      </div>
+    </section>
   </main>
 
+  <div id="audit-modal-overlay" class="audit-modal-overlay" hidden>
+    <div class="audit-modal-panel">
+      <div class="audit-modal-head">
+        <h3>Interaction detail</h3>
+        <button id="audit-modal-close" class="audit-modal-close" type="button" aria-label="Close">&times;</button>
+      </div>
+      <div id="audit-modal-body" class="audit-modal-body"></div>
+    </div>
+  </div>
+
+  <script src="audit-render.js"></script>
   <script src="aihub-dashboard.js"></script>
 </body>
 </html>

@@ -222,6 +222,15 @@ def get_metrics_summary(days: int = 14) -> dict:
     return metrics.build_summary(days=days)
 
 
+@app.get("/api/audit/recent")
+def get_recent_audit_events(limit: int = 50) -> dict:
+    """Concise, cross-customer feed of recent agent actions/decisions for
+    the AI Hub dashboard's Audit History section. Demo-only: a real
+    deployment would restrict this to managers/auditors, same caveat as
+    the other /api/audit endpoints."""
+    return {"events": audit.read_recent_events(limit=limit)}
+
+
 @app.get("/api/audit/verify")
 def verify_audit_chain() -> dict:
     """Recomputes the hash chain over the whole audit log and reports
