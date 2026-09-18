@@ -281,12 +281,21 @@ body.sidebar-collapsed .chat-shell {
 }
 
 .messages {
+  position: relative;
   flex: 1;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 12px;
   padding-bottom: 12px;
+
+  background-color: rgba(245, 246, 248, 0.82);
+  background-image: url("assets/Images/chat-background.png");
+  background-repeat: no-repeat;
+  background-position: center center;
+  background-size: 700px auto;
+  background-attachment: scroll;
+  background-blend-mode: lighten;
 }
 
 .msg {
