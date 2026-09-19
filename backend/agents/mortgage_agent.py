@@ -315,6 +315,12 @@ def _extract_attached_documents(history: list[dict]) -> list[dict]:
     return documents
 
 
+def _document_form_submitted(history: list[dict]) -> bool:
+    """The frontend sends the reviewed form as a labeled user message."""
+    last_user = next((m.get("content", "") for m in reversed(history) if m.get("role") == "user"), "")
+    return "Monthly gross income" in last_user and "Total monthly expenses" in last_user
+
+
 IDENTITY_HINT_RE = re.compile(r"\d{6,8}[-\s]?\d{4}")
 
 
@@ -844,7 +850,7 @@ def _build_document_form(extraction: dict | None) -> dict | None:
         return None
     return {
         "type": "document_application",
-        "title": "Application details from uploaded documents",
+        "title": "Review application details from uploaded documents",
         "fields": fields,
     }
 
@@ -1003,15 +1009,23 @@ def run_loan_promise_agent(history: list[dict], lang: str | None = None) -> tupl
     messages.extend(history)
 
     documents_attached = len(_extract_attached_documents(history))
+    form_submitted = _document_form_submitted(history)
 
     if documents_attached >= 2:
         messages.append({
             "role": "system",
             "content": (
                 "All prerequisites are present (identity details and 2 attached documents). "
-                "In THIS reply, run the full pipeline via tool calls as described in step 3 of "
-                "your instructions, ending with either a Loan Promise, a review hand-off, or a "
-                "decline. Do not just ask another clarifying question."
+                + (
+                    "The customer has reviewed and submitted the extracted application form. "
+                    "Run the full pipeline and return the Loan Promise, review hand-off, or "
+                    "decline outcome."
+                    if form_submitted else
+                    "This is the document-review step. Verify identity and call "
+                    "extract_mortgage_documents, then stop. Do not assess affordability, "
+                    "calculate terms, create a review case, or produce a final decision yet. "
+                    "Tell the customer the extracted details are ready to review and submit."
+                )
             ),
         })
     else:
@@ -1122,7 +1136,7 @@ def run_loan_promise_agent(history: list[dict], lang: str | None = None) -> tupl
     last_user_message = next(
         (m.get("content", "") for m in reversed(history) if m.get("role") == "user"), ""
     )
-    extra = {"form": _build_document_form(last_extraction)} if last_extraction else {}
+    extra = {"form": _build_document_form(last_extraction)} if last_extraction and not form_submitted else {}
     if last_extraction:
         extra["document_review"] = {
             "income_statement": last_extraction.get("income_statement"),
@@ -1163,20 +1177,23 @@ def run_loan_offer_agent(history: list[dict], lang: str | None = None) -> tuple[
     messages.extend(history)
 
     documents_attached = len(_extract_attached_documents(history))
+    form_submitted = _document_form_submitted(history)
 
     if documents_attached >= 3:
         messages.append({
             "role": "system",
             "content": (
                 "All prerequisites are present (identity details and 3 attached documents). "
-                "In THIS reply, run the full pipeline via tool calls as described in step 3 of "
-                "your instructions, ending with either a Loan Offer, a review hand-off, or a "
-                "decline. Do NOT ask the customer to confirm the purchase price or a loan "
-                "amount first - extract_mortgage_documents will give you the price, and if no "
-                "specific loan amount was stated anywhere in this conversation, use 85% of "
-                "that price automatically. Do not just ask another clarifying question. If "
-                "extraction comes back needs_review=true, your reply must summarize the actual "
-                "special_conditions in plain language, not just say 'special conditions exist'."
+                + (
+                    "The customer has reviewed and submitted the extracted application form. "
+                    "Run the full pipeline and return the Loan Offer, review hand-off, or "
+                    "decline outcome."
+                    if form_submitted else
+                    "This is the document-review step. Verify identity and call "
+                    "extract_mortgage_documents, then stop. Do not assess affordability, "
+                    "calculate terms, create a review case, or produce a final decision yet. "
+                    "Tell the customer the extracted details are ready to review and submit."
+                )
             ),
         })
     else:
@@ -1307,5 +1324,5 @@ def run_loan_offer_agent(history: list[dict], lang: str | None = None) -> tuple[
     last_user_message = next(
         (m.get("content", "") for m in reversed(history) if m.get("role") == "user"), ""
     )
-    extra = {"form": _build_document_form(last_extraction)} if last_extraction else {}
+    extra = {"form": _build_document_form(last_extraction)} if last_extraction and not form_submitted else {}
     return reply, generate_suggestions(last_user_message, reply), extra
