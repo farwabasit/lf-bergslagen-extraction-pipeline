@@ -315,6 +315,20 @@ def get_chat_session(session_id: str) -> dict | None:
         }
 
 
+def delete_chat_session(session_id: str) -> bool:
+    """Remove a chat's transcript (and its session row) entirely - used by the
+    sidebar's delete-chat option. Messages are removed first since they
+    reference the session row via a foreign key."""
+    with _session() as db:
+        row = db.get(ChatSession, session_id)
+        if row is None:
+            return False
+        db.query(ChatMessage).filter(ChatMessage.session_id == session_id).delete()
+        db.delete(row)
+        db.commit()
+        return True
+
+
 def list_chat_session_summaries() -> list[dict]:
     with _session() as db:
         summaries = []

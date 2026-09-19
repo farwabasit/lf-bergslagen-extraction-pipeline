@@ -28,6 +28,9 @@ class SessionStore:
     def get(self, session_id: str) -> dict | None:
         return db.get_chat_session(session_id)
 
+    def delete(self, session_id: str) -> bool:
+        return db.delete_chat_session(session_id)
+
     def list_summaries(self) -> list[dict]:
         return db.list_chat_session_summaries()
 
