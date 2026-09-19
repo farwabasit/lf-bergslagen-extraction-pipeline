@@ -54,6 +54,7 @@ body {
   flex: 1;
   display: flex;
   min-height: 0;
+  overflow: hidden;
 }
 
 .sidebar {
@@ -64,7 +65,7 @@ body {
   display: flex;
   flex-direction: column;
   padding: 12px;
-  overflow-y: auto;
+  overflow: hidden;
 }
 
 .sidebar-header {
@@ -191,8 +192,10 @@ body.sidebar-collapsed #sidebar-show-btn {
 
 .chat-list {
   display: flex;
+  flex: 1;
   flex-direction: column;
   gap: 4px;
+  min-height: 0;
   overflow-y: auto;
 }
 
@@ -331,6 +334,7 @@ body.sidebar-collapsed #sidebar-show-btn {
   margin: 0 auto;
   padding: 16px 32px;
   min-height: 0;
+  overflow: hidden;
   transition: max-width 0.2s ease;
 }
 
@@ -473,7 +477,12 @@ body.sidebar-collapsed .chat-shell {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  padding-bottom: 12px;
+  /* Bleed to the full width of .chat-shell (canceling its side padding via
+     negative margin, then reapplying it as our own padding) so the
+     scrollbar renders flush against the panel's true edge instead of
+     sitting ~32px inboard of it. */
+  margin: 0 -32px;
+  padding: 0 32px 12px;
 
   background-color: rgba(245, 246, 248, 0.82);
   background-image: url("assets/Images/chat-background.png");
