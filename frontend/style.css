@@ -992,7 +992,6 @@ body.sidebar-collapsed .chat-shell {
   min-width: 160px;
 }
 
-.comparison-table-detail th.tier-recommended,
 .comparison-table-detail td.tier-recommended {
   background: #eaf1fa;
 }
@@ -1070,6 +1069,18 @@ body.sidebar-collapsed .chat-shell {
   gap: 12px;
 }
 
+.inline-form h3 {
+  margin: 0;
+  font-size: 14px;
+  color: var(--lf-blue-dark);
+}
+
+.inline-form-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
 .inline-form-field {
   display: flex;
   flex-direction: column;
@@ -1116,6 +1127,72 @@ body.sidebar-collapsed .chat-shell {
 
 .inline-form button[type="submit"] {
   align-self: flex-start;
+}
+
+.inline-form-submitted {
+  background: #f4faf7;
+  border-color: #cfe9dc;
+  padding: 10px 14px;
+  gap: 6px;
+}
+
+.inline-form-summary-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+}
+
+.inline-form-summary-label {
+  color: var(--text-muted);
+}
+
+.inline-form-summary-value {
+  color: var(--text-main);
+  font-weight: 600;
+  text-align: right;
+}
+
+.form-saved-note {
+  align-self: flex-start;
+  padding: 2px 4px;
+  font-size: 13px;
+}
+
+.form-saved-link {
+  color: var(--lf-blue-dark);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.form-saved-link:hover {
+  color: var(--lf-blue);
+}
+
+.form-save-error {
+  align-self: flex-start;
+  padding: 2px 4px;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  font-style: italic;
+}
+
+.fill-form-btn {
+  align-self: flex-start;
+  margin: 0 0 10px;
+  padding: 8px 14px;
+  border: 1px solid var(--lf-blue);
+  border-radius: 6px;
+  background: white;
+  color: var(--lf-blue-dark);
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.fill-form-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 
 .msg-label {
@@ -1231,9 +1308,12 @@ body.sidebar-collapsed .chat-shell {
 }
 
 .composer button.icon-btn {
+  align-items: center;
   background: white;
   border: 1px solid var(--border);
   color: var(--lf-blue-dark);
+  display: flex;
+  justify-content: center;
   padding: 0;
   width: 42px;
   font-size: 17px;

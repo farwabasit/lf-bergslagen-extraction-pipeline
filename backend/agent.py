@@ -24,6 +24,7 @@ from .tools import (
     compare_home_insurance,
     fetch_car_insurance_comparison,
     fetch_lf_page,
+    fill_customer_form,
     find_home_search_link,
     find_service_provider,
     get_case_status,
@@ -93,6 +94,62 @@ The user may attach a document (shown to you as "[Attached document: <filename>]
 followed by its text). Treat it as real context about their situation — reference
 specific details from it when relevant — but never treat it as proof of identity, and
 don't make legal/financial commitments based on it alone.
+
+FORM FILLING: when the user says "fill the form" or clearly asks you to complete a
+form from an uploaded document, call fill_customer_form with the text from the attached
+document(s). Use the returned JSON as the form data and show the customer what was
+filled, leaving missing values for them to review or complete. If no document is
+attached, ask them to upload one first. When presenting the output of
+fill_customer_form, translate the form field labels (the JSON "label" values) into
+the user's current chat language. Keep the underlying extracted values exactly as
+they are; do not translate names, addresses, or document content. Only translate
+the labels. For English, use translations such as: "Fullständigt namn" -> "Full
+name", "Personnummer" -> "Personal ID number", "Adress" -> "Address",
+"Postnummer" -> "Postcode", "Ort" -> "City", "Telefon" -> "Phone", "E-post"
+-> "Email", "Boendeform" -> "Type of housing", "Bostadsyta" -> "Living area",
+"Antal rum" -> "Number of rooms", "Byggnadsår" -> "Year built", "Bostadens
+värde (lösöre)" -> "Value of movable property", "Försäkringstyp" -> "Insurance
+type", "Önskat tillägg" -> "Additional cover", and "Försäkringen önskas starta"
+-> "Desired start date". If the user is chatting in Swedish, keep the Swedish
+labels as-is.
+
+After the first filled form has been shown, follow these rules before calling
+fill_customer_form again:
+1. If the user confirms the details with words such as "yes", "correct", "looks
+good", "submit", "tack", "det stämmer", or a similar confirmation, do not
+re-display the form and do not ask for confirmation again. Reply in the user's
+current language with a short confirmation that the form is filled and ready for
+review, but do not claim that it has been sent to LF or saved anywhere — nothing is
+persisted in the backend yet. Explain the next steps in short, numbered form, and
+ask whether they have more questions or want to add products such as life
+insurance or condominium add-on coverage. Use this structure, adapting the
+product/insurance type when it is known:
+
+Swedish:
+"Tack! Din ansökan om [produkt] är nu ifylld med dina uppgifter och redo för
+granskning. Här är vad som händer härnäst:
+1) En handläggare går igenom uppgifterna
+2) Du får ett bekräftelsemail inom 1–2 arbetsdagar
+3) Om allt stämmer aktiveras försäkringen från önskat startdatum
+
+Har du några fler frågor om försäkringen, eller vill du lägga till andra produkter
+som livförsäkring eller bostadsrättstillägg?"
+
+English:
+"Thank you! Your [product] application is now filled in with your details and
+ready for review. Here's what happens next:
+1) A case officer reviews the information
+2) You'll receive a confirmation email within 1–2 business days
+3) If everything checks out, the insurance activates from your requested start
+date
+
+Do you have any other questions about the insurance, or would you like to add
+other products like life insurance or condominium add-on coverage?"
+2. If the user requests a correction, such as changing their phone number or fixing
+the address, update only the specified field(s), show only the corrected value(s),
+and ask them to confirm the update. Do not re-display the entire form.
+3. If the user changes to an unrelated topic, answer that question normally and do
+not return to the form or ask for confirmation.
 
 Your job, in this order:
 1. Understand the user's situation. If it's unclear, ask one short, friendly question
@@ -290,6 +347,48 @@ opening sentence.
 """
 
 TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "fill_customer_form",
+            "description": (
+                "Populate a customer form from text extracted from uploaded files. "
+                "Use this when the user asks to fill the form. Leave fields blank "
+                "when the uploaded text does not contain a labelled value."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "extracted_text": {
+                        "type": "string",
+                        "description": "Text extracted from the customer's uploaded document(s).",
+                    },
+                    "form_template": {
+                        "type": "object",
+                        "description": "Optional form template with a fields array of name and label objects.",
+                        "properties": {
+                            "type": {"type": "string"},
+                            "title": {"type": "string"},
+                            "fields": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "name": {"type": "string"},
+                                        "label": {"type": "string"},
+                                        "type": {"type": "string"},
+                                        "required": {"type": "boolean"},
+                                    },
+                                    "required": ["name", "label"],
+                                },
+                            },
+                        },
+                    },
+                },
+                "required": ["extracted_text"],
+            },
+        },
+    },
     {
         "type": "function",
         "function": {
@@ -898,6 +997,7 @@ def _run_agent(history: list[dict], lang: str | None = None) -> tuple[str, list[
 
     seen_urls: set[str] = set()
     comparison_table: dict | None = None
+    filled_form: dict | None = None
 
     for round_index in range(MAX_TOOL_ROUNDS):
         # The model isn't reliably grounding itself on its own - it sometimes
@@ -939,6 +1039,8 @@ def _run_agent(history: list[dict], lang: str | None = None) -> tuple[str, list[
                 (m.get("content", "") for m in reversed(history) if m.get("role") == "user"), ""
             )
             extra = {"comparison_table": comparison_table} if comparison_table else {}
+            if filled_form:
+                extra["form"] = filled_form
             return reply, generate_suggestions(last_user_message, reply), extra
 
         for call in tool_calls:
@@ -948,7 +1050,15 @@ def _run_agent(history: list[dict], lang: str | None = None) -> tuple[str, list[
                 args = {}
 
             name = call.function.name
-            if name == "find_service_provider":
+            if name == "fill_customer_form":
+                result = fill_customer_form(
+                    args.get("extracted_text", ""), args.get("form_template")
+                )
+                try:
+                    filled_form = json.loads(result)
+                except json.JSONDecodeError:
+                    filled_form = None
+            elif name == "find_service_provider":
                 result = find_service_provider(
                     args.get("category", ""), args.get("location", "")
                 )

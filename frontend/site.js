@@ -50,7 +50,6 @@ function openWidget(text) {
     frameEl.src = "index.html";
   }
   widgetEl.hidden = false;
-  fabBtn.textContent = "💬";
   if (text) sendToChat(text);
 }
 

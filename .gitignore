@@ -9,6 +9,8 @@ venv/
 backend/audit_log.jsonl
 backend/metrics_log.jsonl
 backend/nba.db
+backend/data/
+backend/cache/
 
 # Local Java build tooling (downloaded, not part of the project)
 /tools/

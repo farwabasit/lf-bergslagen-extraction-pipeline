@@ -5,6 +5,7 @@ const chipsEl = document.getElementById("chips");
 const attachBtn = document.getElementById("attach-btn");
 const fileInput = document.getElementById("file-input");
 const attachmentPreviewEl = document.getElementById("attachment-preview");
+const fillFormBtn = document.getElementById("fill-form-btn");
 const micBtn = document.getElementById("mic-btn");
 const humanBtn = document.getElementById("human-btn");
 const humanBtnLabel = document.getElementById("human-btn-label");
@@ -200,6 +201,7 @@ let ratingSubmitted = false; // this session already sent a satisfaction rating
 let sessionMessageCount = 0; // how many session-store messages we've already accounted for
 let humanHandoffActive = false; // once true, the composer talks to a human, not the AI
 let lastKnownAgent = null; // name of the CS agent assigned to this session, if any
+let activeForm = null; // control handle for the most recently rendered inline form (see addForm), or null once there's nothing pending to confirm/correct
 let sessionId =
   sessionStorage.getItem("ltn-session-id") ||
   (() => {
@@ -630,6 +632,33 @@ function addOffers(offers, customerId) {
   messagesEl.scrollTop = messagesEl.scrollHeight;
 }
 
+// --- Link shown in chat after a confirmed form is saved via POST /api/forms ---
+
+function addFormSavedLink(url) {
+  const div = document.createElement("div");
+  div.className = "msg form-saved-note";
+  const link = document.createElement("a");
+  link.className = "form-saved-link";
+  link.href = url;
+  link.target = "_blank";
+  link.rel = "noopener";
+  link.textContent = currentLang === "sv" ? "Visa inlämnad ansökan →" : "View submitted form →";
+  div.appendChild(link);
+  messagesEl.appendChild(div);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+function addFormSaveError() {
+  const div = document.createElement("div");
+  div.className = "msg form-save-error";
+  div.textContent =
+    currentLang === "sv"
+      ? "Kunde inte spara ansökan — försök igen"
+      : "Could not save the form — please try again";
+  messagesEl.appendChild(div);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
 // --- Inline structured form (e.g. fraud/dispute follow-up questions) ---
 //
 // The backend can't reliably free-parse an answer to "suspected place of
@@ -647,6 +676,18 @@ const FORM_FIELD_ANSWER_PREFIX = {
   dob: "Date of birth",
 };
 
+// The user's own confirmation text is too free-form (esp. in Swedish) to match
+// reliably, so the primary signal is the agent's *reply*: backend/agent.py's
+// FORM FILLING prompt (rule 1) always has the model mention a case officer/
+// "handläggare" reviewing the details and that the form is ready for review
+// once it treats the form as confirmed -- a fixed-enough phrase to detect,
+// and one that isn't used anywhere else in the agent's replies. The user-text
+// regexes below are a secondary check for the (less reliable) case where the
+// reply doesn't happen to include that phrasing.
+const FORM_CONFIRM_REPLY_RE = /(handl[äa]ggare|case officer|redo f[öo]r granskning|ready for review)/i;
+const FORM_CONFIRM_RE = /\b(yes|that'?s (correct|right)|looks good|looks right|submit|confirmed?|tack|det st[äa]mmer|ja)\b/i;
+const FORM_CHANGE_RE = /\b(change|update|fix|wrong|incorrect|[äa]ndra|byt|fel|uppdatera)\b/i;
+
 function addForm(form) {
   if (!form || !form.fields || !form.fields.length) return;
 
@@ -654,60 +695,131 @@ function addForm(form) {
   wrapper.className = "inline-form";
 
   const values = {};
-  for (const field of form.fields) {
-    const fieldEl = document.createElement("div");
-    fieldEl.className = "inline-form-field";
+  let formSubmitted = false;
+  let formSaved = false; // guards against POSTing the same confirmed form twice
 
-    const label = document.createElement("label");
-    label.textContent = field.label;
-    fieldEl.appendChild(label);
-
-    if (field.type === "yesno") {
-      const group = document.createElement("div");
-      group.className = "inline-form-yesno";
-      for (const option of ["Yes", "No"]) {
-        const optId = `${field.name}-${option}`;
-        const radioLabel = document.createElement("label");
-        radioLabel.className = "inline-form-radio";
-        const radio = document.createElement("input");
-        radio.type = "radio";
-        radio.name = field.name;
-        radio.value = option;
-        radio.id = optId;
-        radio.addEventListener("change", () => {
-          values[field.name] = option;
-        });
-        radioLabel.appendChild(radio);
-        radioLabel.append(` ${option}`);
-        group.appendChild(radioLabel);
-      }
-      fieldEl.appendChild(group);
-    } else {
-      const input = document.createElement("input");
-      input.type = "text";
-      input.required = true;
-      if (field.placeholder) input.placeholder = field.placeholder;
-      input.addEventListener("input", () => {
-        values[field.name] = input.value;
-      });
-      fieldEl.appendChild(input);
-    }
-
-    wrapper.appendChild(fieldEl);
+  if (form.title) {
+    const title = document.createElement("h3");
+    title.textContent = form.title;
+    wrapper.appendChild(title);
   }
+
+  const fieldsContainer = document.createElement("div");
+  fieldsContainer.className = "inline-form-fields";
+  wrapper.appendChild(fieldsContainer);
 
   const errorEl = document.createElement("p");
   errorEl.className = "inline-form-error";
-  wrapper.appendChild(errorEl);
 
   const submitBtn = document.createElement("button");
   submitBtn.type = "submit";
   submitBtn.textContent = "Submit";
-  wrapper.appendChild(submitBtn);
+
+  function renderEditableFields() {
+    fieldsContainer.innerHTML = "";
+    for (const field of form.fields) {
+      const fieldEl = document.createElement("div");
+      fieldEl.className = "inline-form-field";
+
+      const label = document.createElement("label");
+      label.textContent = field.label;
+      fieldEl.appendChild(label);
+
+      if (field.type === "yesno") {
+        const group = document.createElement("div");
+        group.className = "inline-form-yesno";
+        for (const option of ["Yes", "No"]) {
+          const optId = `${field.name}-${option}`;
+          const radioLabel = document.createElement("label");
+          radioLabel.className = "inline-form-radio";
+          const radio = document.createElement("input");
+          radio.type = "radio";
+          radio.name = field.name;
+          radio.value = option;
+          radio.id = optId;
+          radio.checked = values[field.name] === option;
+          radio.addEventListener("change", () => {
+            values[field.name] = option;
+          });
+          radioLabel.appendChild(radio);
+          radioLabel.append(` ${option}`);
+          group.appendChild(radioLabel);
+        }
+        fieldEl.appendChild(group);
+      } else {
+        const input = document.createElement("input");
+        input.type = "text";
+        input.required = field.required !== false;
+        if (values[field.name] !== undefined) {
+          input.value = values[field.name];
+        } else if (field.value !== null && field.value !== undefined) {
+          input.value = String(field.value);
+          values[field.name] = input.value;
+        }
+        if (field.placeholder) input.placeholder = field.placeholder;
+        input.addEventListener("input", () => {
+          values[field.name] = input.value;
+        });
+        fieldEl.appendChild(input);
+      }
+
+      fieldsContainer.appendChild(fieldEl);
+    }
+    wrapper.classList.remove("inline-form-submitted");
+    errorEl.textContent = "";
+    wrapper.append(errorEl, submitBtn);
+  }
+
+  function renderSummary() {
+    fieldsContainer.innerHTML = "";
+    for (const field of form.fields) {
+      const row = document.createElement("div");
+      row.className = "inline-form-summary-row";
+      const label = document.createElement("span");
+      label.className = "inline-form-summary-label";
+      label.textContent = field.label;
+      const value = document.createElement("span");
+      value.className = "inline-form-summary-value";
+      value.textContent = values[field.name] || "—";
+      row.append(label, value);
+      fieldsContainer.appendChild(row);
+    }
+    wrapper.classList.add("inline-form-submitted");
+    errorEl.remove();
+    submitBtn.remove();
+  }
+
+  async function saveForm() {
+    if (formSaved) return;
+    formSaved = true;
+    try {
+      const res = await fetch("/api/forms", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session_id: sessionId,
+          title: form.title || "Insurance application",
+          fields: form.fields.map((f) => ({
+            name: f.name,
+            label: f.label,
+            value: values[f.name] || "",
+          })),
+        }),
+      });
+      if (!res.ok) throw new Error(`Server responded with ${res.status}`);
+      const data = await res.json();
+      addFormSavedLink(data.url);
+    } catch (err) {
+      console.error(err);
+      addFormSaveError();
+    }
+  }
+
+  renderEditableFields();
 
   wrapper.addEventListener("submit", (e) => {
     e.preventDefault();
-    const missing = form.fields.filter((f) => !values[f.name]);
+    const missing = form.fields.filter((f) => f.required !== false && !values[f.name]);
     if (missing.length) {
       errorEl.textContent = "Please fill in all fields before submitting.";
       return;
@@ -715,12 +827,32 @@ function addForm(form) {
     const composed = form.fields
       .map((f) => `${FORM_FIELD_ANSWER_PREFIX[f.name] || f.label}: ${values[f.name]}`)
       .join("\n");
-    wrapper.remove();
+    formSubmitted = true;
+    renderSummary();
+    saveForm();
     sendMessage(composed);
   });
 
   messagesEl.appendChild(wrapper);
   messagesEl.scrollTop = messagesEl.scrollHeight;
+
+  activeForm = {
+    get submitted() {
+      return formSubmitted;
+    },
+    markSubmitted() {
+      if (formSubmitted) return;
+      formSubmitted = true;
+      renderSummary();
+      saveForm();
+    },
+    markEditable() {
+      if (!formSubmitted) return;
+      formSubmitted = false;
+      formSaved = false;
+      renderEditableFields();
+    },
+  };
 }
 
 // --- Comparison table (e.g. car insurance tiers) - real, structured data
@@ -769,7 +901,7 @@ function renderBooleanComparisonTable(wrapper, table) {
 }
 
 // --- Home insurance tier comparison (Bas/Mellan/Stor) - text-per-cell
-// rather than checkmarks, an optional "AI Recommendation for You" badge
+// rather than checkmarks, an optional "Sara recommended for you" badge
 // above whichever column compare_home_insurance (backend) decided fits this
 // conversation, a footnote explaining why, and a client-side Single/
 // Co-living toggle that swaps the price row using values already present in
@@ -796,7 +928,7 @@ function renderTierComparisonTable(wrapper, table) {
     table.columns.forEach((_, i) => {
       const cell = document.createElement("span");
       cell.className = "tier-badge-cell";
-      if (i === recommendedIndex) cell.innerHTML = `<span class="tier-badge">✨ AI Recommendation for You</span>`;
+      if (i === recommendedIndex) cell.innerHTML = `<span class="tier-badge">✨ Sara recommended for you</span>`;
       badgeRow.appendChild(cell);
     });
     wrapper.appendChild(badgeRow);
@@ -969,7 +1101,15 @@ async function getAssistantReply() {
     sessionMessageCount += 2; // the server just appended one user + one assistant message
     upsertChatListEntry();
     addSuggestions(data.suggestions, data.human_chat_option);
-    addForm(data.form);
+    if (activeForm && !activeForm.submitted && FORM_CONFIRM_REPLY_RE.test(data.content)) {
+      // The backend forces a tool call on the first round of every turn, which
+      // sometimes makes it re-invoke fill_customer_form on this very
+      // confirmation turn even though nothing changed -- treat the reply as
+      // the confirmation it is instead of popping up a duplicate form.
+      activeForm.markSubmitted();
+    } else {
+      addForm(data.form);
+    }
     addOffers(data.offers, data.offers_customer_id);
     addComparisonTable(data.comparison_table);
     updateProgressRing(data.progress);
@@ -997,6 +1137,8 @@ function formatFileSize(bytes) {
 
 function renderAttachmentPreview(status = "") {
   attachmentPreviewEl.innerHTML = "";
+  fillFormBtn.hidden = !stagedFiles.length;
+  fillFormBtn.disabled = !stagedFiles.length;
   if (!stagedFiles.length && !status) {
     attachmentPreviewEl.hidden = true;
     return;
@@ -1076,7 +1218,7 @@ function buildMessageText(text, attachments) {
 
   for (const attachment of attachments) {
     const extractedText = attachment.text || "No readable text was extracted from this file.";
-    parts.push(`[Attached file: ${attachment.filename}]\n\n${extractedText}`);
+    parts.push(`[Attached document: ${attachment.filename}]\n\n${extractedText}`);
   }
 
   return parts.join("\n\n");
@@ -1094,11 +1236,24 @@ function setComposerBusy(busy) {
   sendBtn.disabled = busy;
   attachBtn.disabled = busy;
   micBtn.disabled = busy;
+  fillFormBtn.disabled = busy || !stagedFiles.length;
 }
+
+fillFormBtn.addEventListener("click", () => {
+  sendMessage("Fill the form", stagedFiles.slice());
+});
 
 async function sendMessage(text, files = []) {
   const textToSend = text.trim();
   if (!textToSend && !files.length) return;
+
+  if (activeForm && textToSend) {
+    if (!activeForm.submitted && FORM_CONFIRM_RE.test(textToSend)) {
+      activeForm.markSubmitted();
+    } else if (activeForm.submitted && FORM_CHANGE_RE.test(textToSend)) {
+      activeForm.markEditable();
+    }
+  }
 
   chipsEl.style.display = "none";
   setComposerBusy(true);
@@ -1385,6 +1540,7 @@ chatSearchInputEl.addEventListener("input", () => renderChatList());
 
 function resetChatView() {
   messagesEl.innerHTML = "";
+  activeForm = null;
   const greetingDiv = document.createElement("div");
   greetingDiv.className = "msg assistant";
   greetingDiv.innerHTML = `<span class="msg-label" id="greeting-label"></span><p id="greeting-text"></p>`;
@@ -1396,6 +1552,8 @@ function resetChatView() {
   stagedFiles = [];
   attachmentPreviewEl.hidden = true;
   attachmentPreviewEl.innerHTML = "";
+  fillFormBtn.hidden = true;
+  fillFormBtn.disabled = true;
   inputEl.value = "";
   inputEl.style.height = "auto";
   humanBtn.disabled = false;
@@ -1464,6 +1622,7 @@ async function loadChat(id) {
     sessionMessageCount = data.messages.length;
     humanHandoffActive = Boolean(data.needs_human);
     lastKnownAgent = data.assigned_agent || null;
+    activeForm = null;
     history = data.messages
       .filter((m) => m.role === "user" || m.role === "assistant")
       .map((m) => ({ role: m.role, content: m.content }));
