@@ -18,6 +18,51 @@ from .uploads import extract_text
 
 CASE_ID_RE = re.compile(r"CASE-\d{6}")
 
+# Next Best Action offers should only ever appear at the natural end of a
+# conversation - when Sara asks a closing question like "anything else I
+# can help with?" and the customer declines - never mid-conversation, even
+# right after an identity check. See the offer-surfacing block in chat()
+# below for how this pairs with db.verified_customer_id (set once, kept for
+# the rest of the session, since verification and the closing moment are
+# usually several turns apart).
+CLOSING_QUESTION_RE = re.compile(
+    r"anything else|any (?:other )?questions?|further questions?|"
+    r"help (?:you )?with (?:anything|something) else|something else i can help|"
+    r"(?:några|fler) frågor|något annat (?:jag|vi) kan hjälpa|hjälpa dig med något annat",
+    re.IGNORECASE,
+)
+DECLINE_RE = re.compile(
+    r"^\s*(?:"
+    r"no\s*,?\s*(?:thanks?|thank you)?"
+    r"|nope|nah"
+    r"|that'?s (?:all|everything)|thats (?:all|everything)"
+    r"|nothing else"
+    r"|i'?m good|im good|i am good|we'?re (?:all )?good"
+    r"|nej\s*(?:tack)?|inget (?:mer|annat)|det var allt|det räcker"
+    r")\s*[.!]?\s*$",
+    re.IGNORECASE,
+)
+
+
+def _is_closing_decline(history: list[dict]) -> bool:
+    """True when the customer's latest message declines a closing question
+    Sara just asked (e.g. "anything else?" / "No thanks") - the one moment
+    Next Best Action offers are allowed to appear."""
+    if not history or history[-1].get("role") != "user":
+        return False
+    if not DECLINE_RE.match(history[-1].get("content", "")):
+        return False
+    prior_assistant = next(
+        (m for m in reversed(history[:-1]) if m.get("role") == "assistant"), None
+    )
+    if not prior_assistant:
+        return False
+    # Only look near the end of Sara's reply - a long checklist reply can
+    # mention "questions" or "anything else" mid-explanation for unrelated
+    # reasons, but a genuine closing question is always the sign-off.
+    tail = (prior_assistant.get("content") or "")[-200:]
+    return bool(CLOSING_QUESTION_RE.search(tail))
+
 app = FastAPI(title="Life Transition Navigator")
 db.init_db()
 
@@ -143,18 +188,25 @@ def chat(req: ChatRequest) -> dict:
         case_created=bool(case_match), case_id=case_id,
     )
 
-    # Next Best Action offers: only ever surfaced right after this exact
-    # turn identity-verified a customer (see verified_customer.py) - never
-    # for an unverified chat. Stored centrally (db.py) so "previous
-    # interactions" and "offers clicked/not clicked" persist across
-    # restarts and across everyone running this app, not just this process.
+    # Next Best Action offers: the customer must have been identity-verified
+    # at some point in this chat (this turn or an earlier one - see
+    # db.verified_customer_id) AND the conversation must be at its closing
+    # moment (Sara just asked "anything else?" and the customer declined -
+    # see _is_closing_decline above). Never mid-conversation, even right
+    # after a fresh identity check. Interaction history itself is still
+    # recorded on every verified turn regardless, for the NBA engine's own
+    # learning data.
     customer_id = verified_customer.get_and_clear()
-    if customer_id:
+    if customer_id and req.session_id:
+        db.set_chat_verified_customer(req.session_id, customer_id)
         db.record_interaction(customer_id, req.session_id, topic, case_id)
-        offers = nba_engine.get_offers_for_customer(customer_id, topic)
+
+    verified_customer_id = db.get_chat_verified_customer(req.session_id) if req.session_id else None
+    if verified_customer_id and _is_closing_decline(history):
+        offers = nba_engine.get_offers_for_customer(verified_customer_id, topic)
         if offers:
             extra["offers"] = offers
-            extra["offers_customer_id"] = customer_id
+            extra["offers_customer_id"] = verified_customer_id
 
     return {
         "role": "assistant",

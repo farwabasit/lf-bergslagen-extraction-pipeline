@@ -977,6 +977,85 @@ function addForm(form) {
   };
 }
 
+// --- Auth choice card - a styled picker for the Loan Promise identity step,
+// modeled after a real Swedish bank login screen rather than plain
+// suggestion chips. Pressing Continue sends the chosen option's own
+// "message" text as the next chat message, exactly like clicking a
+// suggestion chip would - the backend's own keyword detection (see
+// _bankid_chosen in mortgage_agent.py) doesn't know or care which UI
+// produced it. With a single option (currently just BankID) the row is
+// shown as plain info text rather than a redundant one-item radio group. ---
+function addAuthChoice(form) {
+  if (!form || !form.options || !form.options.length) return;
+
+  const wrapper = document.createElement("div");
+  wrapper.className = "auth-choice-card";
+
+  const heading = document.createElement("h3");
+  heading.className = "auth-choice-heading";
+  heading.textContent = (form.heading && form.heading[currentLang]) || form.heading?.en || "";
+  wrapper.appendChild(heading);
+
+  const optionsWrap = document.createElement("div");
+  optionsWrap.className = "auth-choice-options";
+  wrapper.appendChild(optionsWrap);
+
+  const singleOption = form.options.length === 1;
+  let selected = form.default || form.options[0].value;
+  let submitted = false;
+
+  form.options.forEach((option) => {
+    const row = document.createElement(singleOption ? "div" : "label");
+    row.className = "auth-choice-option";
+
+    let radio = null;
+    if (!singleOption) {
+      radio = document.createElement("input");
+      radio.type = "radio";
+      radio.name = `auth-choice-${Math.random().toString(36).slice(2)}`;
+      radio.value = option.value;
+      radio.checked = option.value === selected;
+      radio.addEventListener("change", () => {
+        selected = option.value;
+      });
+    }
+
+    const text = document.createElement("span");
+    text.className = "auth-choice-option-text";
+    const title = document.createElement("span");
+    title.className = "auth-choice-option-label";
+    title.textContent = option.label;
+    text.appendChild(title);
+    if (option.helper) {
+      const helper = document.createElement("span");
+      helper.className = "auth-choice-option-helper";
+      helper.textContent = option.helper[currentLang] || option.helper.en || "";
+      text.appendChild(helper);
+    }
+
+    if (radio) row.appendChild(radio);
+    row.appendChild(text);
+    optionsWrap.appendChild(row);
+  });
+
+  const continueBtn = document.createElement("button");
+  continueBtn.type = "button";
+  continueBtn.className = "auth-choice-continue-btn";
+  continueBtn.textContent = (form.continue_label && form.continue_label[currentLang]) || form.continue_label?.en || "Continue";
+  continueBtn.addEventListener("click", () => {
+    if (submitted) return;
+    submitted = true;
+    continueBtn.disabled = true;
+    wrapper.classList.add("auth-choice-submitted");
+    const chosen = form.options.find((option) => option.value === selected);
+    sendMessage(chosen ? chosen.message : selected);
+  });
+  wrapper.appendChild(continueBtn);
+
+  messagesEl.appendChild(wrapper);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
 // --- Comparison table (e.g. car insurance tiers) - real, structured data
 // the backend scraped from LF Bergslagen's own live page (see
 // compare_car_insurance / fetch_car_insurance_comparison in the backend),
@@ -1229,6 +1308,8 @@ async function getAssistantReply() {
       // confirmation turn even though nothing changed -- treat the reply as
       // the confirmation it is instead of popping up a duplicate form.
       activeForm.markSubmitted();
+    } else if (data.form && data.form.type === "auth_choice") {
+      addAuthChoice(data.form);
     } else {
       addForm(data.form);
     }

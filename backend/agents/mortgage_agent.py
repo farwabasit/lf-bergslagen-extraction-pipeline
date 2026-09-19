@@ -30,7 +30,7 @@ from ..knowledge import LF_PAGES, MOCK_CUSTOMERS
 from ..link_safety import URL_RE, strip_unverified_links
 from ..llm_client import client
 from ..suggestions import generate_suggestions
-from ..tools import fetch_lf_page, verify_customer_identity
+from ..tools import fetch_lf_page, verify_customer_by_personnummer, verify_customer_identity
 from . import credit_agent, document_agent, loan_calc
 
 MAX_TOOL_ROUNDS = 8
@@ -89,18 +89,8 @@ IDENTITY_FORM = {
     ],
 }
 ASK_IDENTITY_TEXT = {
-    "loan_promise": {
-        "en": (
-            "I'm the mortgage specialist Sara connected you with. To start your Loan "
-            "Promise (Lånelöfte) application, I need to verify your identity - please "
-            "fill in your details below."
-        ),
-        "sv": (
-            "Jag är bolånespecialisten som Sara kopplade dig till. För att starta din "
-            "ansökan om lånelöfte behöver jag verifiera din identitet - fyll i dina "
-            "uppgifter nedan."
-        ),
-    },
+    # loan_promise no longer uses this - it authenticates via BankID only,
+    # see AUTH_CHOICE_TEXT below.
     "loan_offer": {
         "en": (
             "I'm the mortgage specialist Sara connected you with. To start your Loan "
@@ -114,6 +104,77 @@ ASK_IDENTITY_TEXT = {
         ),
     },
 }
+
+# Every Loan Promise request authenticates via BankID only - no personnummer
+# form alternative. Deterministic gate, not an LLM-generated choice, for the
+# same reliability reason as IDENTITY_FORM above (which loan_offer still
+# uses; loan_promise no longer does).
+AUTH_CHOICE_TEXT = {
+    "loan_promise": {
+        # Deliberately "Lånelöfte (Loan Promise)", not "Loan Promise (Lånelöfte)" -
+        # the latter is a LOAN_PROMISE_RESOLVED_MARKERS string reserved for the
+        # flow's actual final heading, and reusing it here made
+        # loan_promise_flow_resolved() see this introductory line and treat the
+        # whole application as already finished one turn in.
+        "en": (
+            "I'm the mortgage specialist Sara connected you with. To start your "
+            "Lånelöfte (Loan Promise) application, I first need to verify your "
+            "identity via BankID."
+        ),
+        "sv": (
+            "Jag är bolånespecialisten som Sara kopplade dig till. För att starta din "
+            "ansökan om lånelöfte behöver jag först verifiera din identitet via BankID."
+        ),
+    },
+}
+AUTH_CHOICE_SUGGESTIONS = {
+    "en": ["Authenticate with BankID"],
+    "sv": ["Autentisera med BankID"],
+}
+BANKID_KEYWORD = "bankid"
+
+# Styled card the frontend renders instead of a generic text-field form (see
+# AUTH_CHOICE_FORM's "auth_choice" type in app.js) - a single BankID action
+# mirroring a real Swedish bank login screen's BankID option. Pressing
+# Continue sends the option's own "message" text as the next chat message,
+# which _bankid_chosen below detects exactly like a clicked suggestion chip
+# would.
+AUTH_CHOICE_FORM = {
+    "type": "auth_choice",
+    "heading": {"en": "Verify your identity", "sv": "Verifiera din identitet"},
+    "options": [
+        {
+            "value": "bankid",
+            "label": "BankID",
+            "helper": {
+                "en": "Choose BankID for a secure and personal experience.",
+                "sv": "Välj BankID för en säker och personlig upplevelse.",
+            },
+            "message": "Authenticate with BankID",
+        },
+    ],
+    "default": "bankid",
+    "continue_label": {"en": "Continue", "sv": "Gå vidare"},
+}
+
+# This is a demo/hackathon prototype with no real BankID integration, so
+# "authenticating with BankID" is simulated as a one-click confirmation
+# against a single fixed mock customer, rather than asking the customer to
+# type a personnummer (which would just be a manual-entry form wearing a
+# BankID label). Real BankID never asks for a personnummer either - the
+# app/QR flow already knows who is confirming.
+BANKID_DEMO_PERSONNUMMER = "19850312-1234"  # Anna Andersson, CUST-1001
+
+
+def _user_texts_joined(history: list[dict]) -> str:
+    return " ".join(m.get("content", "") for m in history if m.get("role") == "user")
+
+
+def _bankid_chosen(history: list[dict]) -> bool:
+    return any(
+        BANKID_KEYWORD in (m.get("content", "") or "").lower()
+        for m in history if m.get("role") == "user"
+    )
 
 
 # Before the Loan Offer flow asks for identity/documents at all, the process
@@ -914,15 +975,30 @@ def _fallback_reply(lang: str | None) -> tuple[str, list[str], dict]:
 
 
 def run_loan_promise_agent(history: list[dict], lang: str | None = None) -> tuple[str, list[str], dict]:
-    has_identity_hint = bool(re.search(r"\d{6,8}[-\s]?\d{4}", " ".join(
-        m.get("content", "") for m in history if m.get("role") == "user"
-    )))
+    key = "sv" if lang == "sv" else "en"
+    bankid_customer = verify_customer_by_personnummer(BANKID_DEMO_PERSONNUMMER) if _bankid_chosen(history) else None
 
-    if not has_identity_hint:
-        key = "sv" if lang == "sv" else "en"
-        return ASK_IDENTITY_TEXT["loan_promise"][key], [], {"form": IDENTITY_FORM}
+    if not bankid_customer:
+        return (
+            AUTH_CHOICE_TEXT["loan_promise"][key],
+            AUTH_CHOICE_SUGGESTIONS[key],
+            {"form": AUTH_CHOICE_FORM},
+        )
 
     messages = [{"role": "system", "content": LOAN_PROMISE_SYSTEM_PROMPT}]
+    if bankid_customer:
+        messages.append({
+            "role": "system",
+            "content": (
+                "The customer authenticated via BankID using only their personnummer - a "
+                "real BankID login already confirms the name and date of birth behind it, "
+                "so do not ask for those separately. Their details: "
+                f"full_name={bankid_customer['name']}, "
+                f"personnummer={bankid_customer['personnummer']}, dob={bankid_customer['dob']}. "
+                "Treat step 1 (IDENTITY) as complete with these values, and use them exactly "
+                "when you call verify_customer_identity in step 3a."
+            ),
+        })
     messages.extend(history)
 
     documents_attached = len(_extract_attached_documents(history))

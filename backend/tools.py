@@ -9,7 +9,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from . import cs_client, verified_customer
-from .knowledge import BOOLI_URL, HOME_INSURANCE_TIERS, LF_PAGES, MOCK_CUSTOMERS, SERVICE_PROVIDERS
+from .knowledge import BOOLI_URL, HEMNET_URL, HOME_INSURANCE_TIERS, LF_PAGES, MOCK_CUSTOMERS, SERVICE_PROVIDERS
 
 # Towns LF Bergslagen actually serves (same list SERVICE_PROVIDERS uses for
 # its local claim partners) - reused here so home-search guidance can tell a
@@ -557,14 +557,16 @@ def _in_lf_bergslagen_area(location: str) -> bool:
     return any(_fold(town) in location_norm or location_norm in _fold(town) for town in LF_BERGSLAGEN_TOWNS)
 
 
-def find_home_search_link(location: str, property_type: str = "", price_range: str = "") -> str:
-    """Point the customer at Booli.se - Sweden's largest home-search site -
-    for actual apartment/villa listings. Booli.se's live search results can't
-    be fetched into this chat (they block automated requests), so this never
-    invents specific listings or a guessed deep link - only the site's real,
-    verified homepage URL, plus plain instructions for what to search/filter
-    for there. Also reports whether the location falls inside LF Bergslagen's
-    own service area, so the agent can be straight about insurance."""
+def find_home_search_link(location: str = "", property_type: str = "", price_range: str = "") -> str:
+    """Point the customer at Booli.se and Hemnet.se - Sweden's two largest
+    home-search sites - for actual apartment/villa listings. Neither site's
+    live search results can be fetched into this chat (they block automated
+    requests), so this never invents specific listings or a guessed deep
+    link - only each site's real, verified homepage URL, plus plain
+    instructions for what to search/filter for there. Also reports whether
+    the location falls inside LF Bergslagen's own service area, so the agent
+    can be straight about insurance. Location is optional - callable with
+    none yet, to make an early, general mention of both sites."""
     location = (location or "").strip()
     filters = []
     if property_type:
@@ -588,10 +590,11 @@ def find_home_search_link(location: str, property_type: str = "", price_range: s
         area_note = "Once you know the town, I can say whether LF Bergslagen's own home insurance applies there."
 
     return (
-        f"Booli.se ({BOOLI_URL}) is Sweden's largest home-search site, covering apartments, "
-        f"villas, and more all across the country.{location_clause} Live listing data can't be "
-        "pulled directly into this chat (booli.se blocks automated access), so Booli's own site "
-        "is the real place to see what's actually on the market right now.\n"
+        f"Booli.se ({BOOLI_URL}) and Hemnet.se ({HEMNET_URL}) are Sweden's two largest "
+        f"home-search sites, covering apartments, villas, and more all across the "
+        f"country.{location_clause} Live listing data can't be pulled directly into this chat "
+        "(both sites block automated access), so their own sites are the real place to see "
+        "what's actually on the market right now.\n"
         f"{area_note}"
     )
 
@@ -628,6 +631,21 @@ def verify_customer_identity(name: str, personnummer: str, dob: str) -> str:
         "birth together. Do not proceed - ask the user to double-check the details, or "
         "offer to connect them with customer service instead."
     )
+
+
+def verify_customer_by_personnummer(personnummer: str) -> dict | None:
+    """BankID-style verification: unlike verify_customer_identity, this only
+    needs the personnummer - a real BankID login already knows the signer's
+    name and date of birth, so there's nothing else to ask for. Demo data
+    only - looks up the mock customer directory, same as above."""
+    pnr_digits = _digits_only(personnummer)
+    if not pnr_digits:
+        return None
+    for customer in MOCK_CUSTOMERS:
+        if pnr_digits == _digits_only(customer["personnummer"]):
+            verified_customer.mark_verified(customer["customer_id"])
+            return customer
+    return None
 
 
 def get_customer_portfolio(customer_id: str) -> str:

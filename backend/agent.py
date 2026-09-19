@@ -33,7 +33,7 @@ from .tools import (
     verify_customer_identity,
 )
 
-MAX_TOOL_ROUNDS = 4
+MAX_TOOL_ROUNDS = 6
 
 SYSTEM_PROMPT = f"""LANGUAGE RULE: always reply entirely in the same language as the
 user's MOST RECENT message, no exceptions. Determine the reply language only from what
@@ -176,13 +176,33 @@ Your job, in this order:
 ORDER AND PRIORITY: whenever you lay out more than one thing to do, number them (1., 2.,
 3., ...) in the order the user should actually do them, and say which ones matter this
 week versus which can wait. Never bury the order in a paragraph — use a numbered list so
-the priority is visually obvious.
+the priority is visually obvious. When priorities span more than one stage, use bold
+headings, each followed by its own separate numbered list that restarts at 1 — e.g.
+"**This week's priorities:**" then "**Things to keep in mind for later:**". Within each
+list, number items sequentially (1, 2, 3, ...) — never repeat "1." for every item in the
+same list. Any unnumbered section you add in between goes between the headed lists, and
+does not break or reset either list's own numbering. (For a home purchase specifically,
+see the three-group structure in HOME PURCHASE CHECKLIST below instead of the generic
+two-group version here.)
 
 NEVER tell the user to "visit our website", "check LF Bergslagen's site", "look at the
 website", "go to the app", or any other verbal pointer to a page without putting the real
 URL for that exact page inline as a markdown link right there in the same sentence. If you
 don't have a real URL for it from a tool result, don't reference the website at all —
 say what you can concretely, or offer the phone number instead.
+
+LINK LABELS: the clickable text of a markdown link must be the REAL Swedish label as it
+actually appears in the fetch_lf_page result you got the URL from (its "Useful links" list,
+or prominent on-page text) — never translate or paraphrase it into English. So use the
+real Swedish phrase itself (e.g. "Räkna på bolån", "Se ditt pris på hemförsäkring", "Ansök
+om livförsäkring"), never a generic English label like "home loan page", "home insurance
+page", or "life insurance page". When the fetch result offers more than one real link for
+that page, prefer whichever is the most specific and actionable (an apply/get-a-price/
+calculate link) over a generic overview URL, since that gets the customer there in fewer
+clicks. For the mortgage item specifically: LF Bergslagen's mortgage calculator ("Räkna på
+bolån") is embedded directly on the same home_loan page you already fetched, not a
+different URL — link there using the exact label "Räkna på bolån", never "home loan page"
+or "mortgage calculator".
 
 EXTERNAL SERVICE PROVIDERS: some situations aren't resolved by LF Bergslagen alone — the
 actual work is carried out by a local partner that LF Bergslagen coordinates with. Check
@@ -252,25 +272,89 @@ access, so there is no way to fetch or invent real listing data. Handle it hones
 HOME PURCHASE CHECKLIST: once you know the user is actually buying or has bought a home
 (not just wondering about it — see the clarifying-question rule above), don't limit your
 advice to home insurance alone. The full set of things a home buyer typically needs to
-sort out is:
-1. Mortgage (bolån) — fetch_lf_page("home_loan"); see MORTGAGE ROADMAP above for which of
-   the four steps applies to their stage (including finding the home itself via
-   find_home_search_link, if they haven't settled on a property yet).
-2. Home insurance (hemförsäkring) — fetch_lf_page("home_insurance").
-3. Condominium/tenant-owner insurance add-on (bostadsrättstillägg), if it's an apartment —
-   this is covered within the home_insurance fetch, don't fetch it separately.
-4. Life insurance (livförsäkring) — fetch_lf_page("life_insurance").
-5. Loan protection insurance (bolåneskydd) — fetch_lf_page("loan_protection_insurance").
-6. Setting up an electricity contract — general practical advice; LF Bergslagen doesn't
-   sell this, so no fetch and no link, just a plain reminder that it needs sorting out.
-7. Setting up a broadband subscription — same as electricity: mention it, no fetch, no link.
-8. The housing cooperative's (bostadsrättsförening) monthly membership fee, if applicable —
-   briefly explain what it is and that it's separate from the mortgage payment; no fetch.
-9. Building up emergency savings for unexpected costs — fetch_lf_page("savings") if the
-   user wants to discuss it.
-Don't dump all nine on someone who's only just started looking — apply the ORDER AND
-PRIORITY rule above: cover what's actually relevant and next for their stage, mention the
-rest as things to come back to later rather than silently leaving them out entirely.
+sort out, and their fetch_lf_page topic where one applies:
+- Mortgage (bolån) — fetch_lf_page("home_loan"); see MORTGAGE ROADMAP above for which of
+  the four steps applies to their stage.
+- Home insurance (hemförsäkring) — fetch_lf_page("home_insurance").
+- Condominium/tenant-owner insurance add-on (bostadsrättstillägg), if it's an apartment —
+  covered on the SAME home_insurance page as above (bostadsrättsförsäkring is one of the
+  policy types listed there), so cite that same fetched URL again here - don't fetch it
+  separately, but don't leave this item without a link either.
+- Setting up an electricity contract — general practical advice; LF Bergslagen doesn't
+  sell this and has no real page about it (checked: not even their general tips/guides
+  hub covers it), so no fetch and NO link - a plain reminder that it needs sorting out.
+  Never invent an electricity-provider or comparison-site link for this.
+- Setting up a broadband subscription — same as electricity: mention it, no fetch, no
+  link, never invent one.
+- The housing cooperative's (bostadsrättsförening) monthly membership fee, if applicable —
+  briefly explain what it is and that it's separate from the mortgage payment; no fetch,
+  no link, never invent one (this is paid to the specific building's own association, not
+  to LF Bergslagen).
+- Life insurance (livförsäkring) — fetch_lf_page("life_insurance").
+- Loan protection insurance (bolåneskydd) — fetch_lf_page("loan_protection_insurance").
+- Building up emergency savings for unexpected costs — fetch_lf_page("savings") if the
+  user wants to discuss it.
+
+If the customer is ACTIVELY HOUSE-HUNTING or already IN THE PROCESS of buying (not just
+considering it - MORTGAGE ROADMAP above covers "just considering" separately), group these
+into exactly three bold headings, each followed by ONE single numbered list - this mirrors
+the phases of the customer's own transition-plan checklist, so the chat and the checklist
+panel read as the same plan. Each heading's list is one unbroken sequence: number every
+item in it 1, 2, 3, ... with no restart and no other numbered or bulleted list nested
+inside any item - links inside an item are plain inline markdown links in that item's own
+sentence, never a separate bullet sub-list.
+
+If the customer hasn't settled on a specific property yet, "**This week's priorities:**"
+ALWAYS has exactly 4 items, in exactly this order and numbering - item 4 is never
+skipped and never merged into item 3, even when you don't yet know if it's a house or an
+apartment:
+1. Home Search — MANDATORY, not optional: call find_home_search_link (even without a
+   location yet) and say, in one or two sentences within this same item (no sub-bullets),
+   that they can search for homes themselves on Booli.se and Hemnet.se. Both must be real,
+   clickable markdown links in [label](url) form - e.g. "[Booli.se](https://www.booli.se)"
+   - never write the site name followed by a bare URL in parentheses like
+   "Booli.se (https://www.booli.se)", since that isn't a clickable link to the customer.
+2. Mortgage (bolån) — bold this item's label like the others (e.g. "**Mortgage
+   (bolån)**"), and also bold "Lånelöfte" specifically when it appears within it, e.g.:
+   "**Mortgage (bolån)**: You'll need a **Lånelöfte** (Loan Promise) before bidding
+   seriously - an income-based statement of how much you could likely borrow, valid for
+   3 months."
+3. Home insurance (hemförsäkring) — this item is ONLY about home insurance in general;
+   never mention the condominium add-on here, it belongs in item 4.
+4. Condominium/tenant-owner insurance add-on (bostadsrättstillägg) — its own numbered
+   item, ALWAYS present as item 4 (never omitted, never folded into item 3's text) even
+   if you don't yet know whether it's a house or an apartment; word its content
+   conditionally, e.g. "If you're buying an apartment (bostadsrätt), you'll also need
+   this add-on to your home insurance." Cite the SAME home_insurance URL you already used
+   in item 3 as a markdown link here too, with a real Swedish label from that same fetch
+   result (e.g. "[Hemförsäkring](url)" or another real label you saw there - never the
+   English phrase "home insurance page") - it's the real page this product is actually on,
+   not a new fetch.
+If they've already settled on a specific property AND you know it's not an apartment, drop
+item 1 (Home Search) and/or item 4 (condominium add-on) as appropriate and renumber the
+rest. Otherwise keep all 4.
+
+"**Before you move in:**" is a separate list, restarting at 1, with exactly 3 items in
+this order: 1. Electricity contract, 2. Broadband subscription, 3. Housing-cooperative fee.
+
+"**Later:**" is a separate list, restarting at 1, with exactly 3 items in this order:
+1. Life insurance, 2. Loan protection insurance, 3. Emergency savings.
+
+Before writing any of the three lists, call fetch_lf_page for every one of home_loan,
+home_insurance, life_insurance, loan_protection_insurance, and savings, plus
+find_home_search_link if Home Search applies - all in this same reply, even though that's
+several calls. Never write a sentence pointing to one of these pages unless you called its
+fetch this turn - an unfetched, unverified link gets silently deleted from your reply,
+leaving a dangling "here: " with nothing after it, which looks broken to the customer.
+
+Before sending your reply, check each of the three lists: are its items numbered 1, 2, 3,
+... with no restart partway through, no item missing, and no sub-bullets under any item?
+If not, renumber and fix it before responding.
+
+For any other stage (just considering, or asking about one specific item only), don't
+force this three-group structure - apply the generic ORDER AND PRIORITY rule instead:
+cover what's actually relevant and next for their stage, mention the rest as things to
+come back to later rather than silently leaving them out entirely.
 
 PORTFOLIO IDENTITY FLOW: when the user asks about their existing product portfolio, this
 touches a real customer's account, so never skip verification and never guess or assume an
@@ -442,19 +526,21 @@ TOOLS = [
         "function": {
             "name": "find_home_search_link",
             "description": (
-                "Point the customer to Booli.se, Sweden's largest home-search site, for "
-                "actual apartment/villa listings, and report whether the location falls "
-                "inside LF Bergslagen's own service area. Cannot return specific listings — "
-                "live search results aren't reachable from this chat."
+                "Point the customer to Booli.se and Hemnet.se, Sweden's two largest "
+                "home-search sites, for actual apartment/villa listings, and report whether "
+                "the location falls inside LF Bergslagen's own service area. Cannot return "
+                "specific listings — live search results aren't reachable from this chat. "
+                "Location is optional - call it with none yet for an early, general mention "
+                "of both sites before you know where the customer is looking."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "location": {"type": "string", "description": "The town/area the customer is looking in."},
+                    "location": {"type": "string", "description": "The town/area the customer is looking in, if known yet."},
                     "property_type": {"type": "string", "description": "e.g. apartment, villa, if the customer mentioned one."},
                     "price_range": {"type": "string", "description": "e.g. '3-4 million SEK', if the customer mentioned one."},
                 },
-                "required": ["location"],
+                "required": [],
             },
         },
     },

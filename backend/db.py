@@ -30,6 +30,8 @@ from sqlalchemy import (
     Text,
     create_engine,
     func,
+    inspect,
+    text,
 )
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
@@ -102,6 +104,12 @@ class ChatSession(Base):
     needs_human = Column(Boolean, nullable=False, default=False)
     assigned_agent = Column(String(128), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    # Set once this chat's customer has been identity-verified (any flow) -
+    # kept for the rest of the session so Next Best Action offers can be
+    # shown later, at the natural end of the conversation, without needing
+    # the customer to re-verify right at that moment. See main.py's
+    # closing-question gate around nba_engine.get_offers_for_customer.
+    verified_customer_id = Column(String(32), nullable=True)
 
 
 class ChatMessage(Base):
@@ -124,6 +132,15 @@ _SessionLocal = sessionmaker(bind=_engine)
 
 def init_db() -> None:
     Base.metadata.create_all(_engine)
+    # create_all only creates missing TABLES, not missing columns on a table
+    # that already existed from before verified_customer_id was added here -
+    # patch it in for anyone with an existing local chat_sessions.db.
+    inspector = inspect(_engine)
+    if "chat_sessions" in inspector.get_table_names():
+        existing_columns = {col["name"] for col in inspector.get_columns("chat_sessions")}
+        if "verified_customer_id" not in existing_columns:
+            with _engine.begin() as conn:
+                conn.execute(text("ALTER TABLE chat_sessions ADD COLUMN verified_customer_id VARCHAR(32)"))
 
 
 def _session() -> Session:
@@ -284,6 +301,19 @@ def set_chat_assigned_agent(session_id: str, agent_name: str) -> None:
         row = _ensure_chat_session(db, session_id)
         row.assigned_agent = agent_name
         db.commit()
+
+
+def set_chat_verified_customer(session_id: str, customer_id: str) -> None:
+    with _session() as db:
+        row = _ensure_chat_session(db, session_id)
+        row.verified_customer_id = customer_id
+        db.commit()
+
+
+def get_chat_verified_customer(session_id: str) -> str | None:
+    with _session() as db:
+        row = db.get(ChatSession, session_id)
+        return row.verified_customer_id if row else None
 
 
 def get_chat_messages_after(session_id: str, after: int) -> list[dict]:
