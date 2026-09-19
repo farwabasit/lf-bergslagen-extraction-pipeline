@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import audit, cs_client, db, forms_store, metrics, nba_engine, verified_customer
-from .agent import run_agent
+from .agent import compute_transition_progress, run_agent
 from .plans import plans
 from .sessions import sessions
 from .topic_classifier import classify_topic
@@ -302,11 +302,13 @@ def rate_session(session_id: str, body: RatingRequest) -> dict:
 def poll_session(session_id: str, after: int = 0) -> dict:
     new_messages = sessions.messages_after(session_id, after)
     total = after + len(new_messages)
+    all_messages = sessions.messages_after(session_id, 0)
     session = sessions.get(session_id) or {}
     return {
         "messages": new_messages,
         "next_after": total,
         "assigned_agent": session.get("assigned_agent"),
+        "progress": compute_transition_progress(all_messages),
     }
 
 

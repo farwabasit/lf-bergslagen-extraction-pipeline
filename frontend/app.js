@@ -1684,6 +1684,7 @@ async function pollForHumanMessages() {
     const res = await fetch(`/api/sessions/${sessionId}/poll?after=${sessionMessageCount}`);
     if (!res.ok) return;
     const data = await res.json();
+    updateProgressRing(data.progress);
 
     if (data.assigned_agent && data.assigned_agent !== lastKnownAgent) {
       lastKnownAgent = data.assigned_agent;

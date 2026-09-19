@@ -20,6 +20,7 @@ from .knowledge import LF_PAGES, SERVICE_PROVIDERS
 from .link_safety import URL_RE, strip_unverified_links as _strip_unverified_links
 from .llm_client import client
 from .suggestions import generate_suggestions
+from .text_utils import strip_attachments
 from .tools import (
     compare_home_insurance,
     fetch_car_insurance_comparison,
@@ -810,7 +811,7 @@ CONTACT_MENU_CHAT_LABEL = {"en": "Chat with a representative", "sv": "Chatta med
 
 def wants_human_contact(history: list[dict]) -> bool:
     last_user = next((m.get("content", "") for m in reversed(history) if m.get("role") == "user"), "")
-    text = last_user.lower()
+    text = strip_attachments(last_user).lower()
     return any(kw in text for kw in HUMAN_CONTACT_KEYWORDS)
 
 

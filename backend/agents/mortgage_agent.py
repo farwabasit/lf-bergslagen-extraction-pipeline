@@ -70,7 +70,10 @@ LOAN_OFFER_RESOLVED_MARKERS = (
     "unable to proceed with this loan offer application",
 )
 
-ATTACHMENT_RE = re.compile(r"^\[Attached document:\s*(.+?)\]\n\n(.*)$", re.DOTALL)
+ATTACHMENT_RE = re.compile(
+    r"\[Attached document:\s*(.+?)\]\n\n(.*?)(?=\n\n\[Attached document:|\Z)",
+    re.DOTALL,
+)
 
 # The identity ask used to be free-form LLM text, paired with LLM-generated
 # suggestion chips like "My full name is..." - which looked like real
@@ -307,8 +310,7 @@ def _extract_attached_documents(history: list[dict]) -> list[dict]:
     for m in history:
         if m.get("role") != "user":
             continue
-        match = ATTACHMENT_RE.match((m.get("content") or "").strip())
-        if match:
+        for match in ATTACHMENT_RE.finditer(m.get("content") or ""):
             documents.append({"filename": match.group(1).strip(), "text": match.group(2).strip()})
     return documents
 
@@ -317,9 +319,8 @@ IDENTITY_HINT_RE = re.compile(r"\d{6,8}[-\s]?\d{4}")
 
 
 def _has_identity_hint(history: list[dict]) -> bool:
-    return bool(IDENTITY_HINT_RE.search(
-        " ".join(m.get("content", "") for m in history if m.get("role") == "user")
-    ))
+    user_text = " ".join(m.get("content", "") for m in history if m.get("role") == "user")
+    return bool(IDENTITY_HINT_RE.search(user_text) or _bankid_chosen(history))
 
 
 def compute_transition_progress(history: list[dict]) -> dict | None:
