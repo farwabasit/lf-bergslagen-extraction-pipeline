@@ -106,6 +106,118 @@ body {
   font-weight: 600;
 }
 
+/* Left-panel mini-portfolio: what an authenticated customer has talked to
+   Sara about, and how far each thing has gotten - see interaction_history.py
+   for how priority/status_label are derived. Sits below the chat list,
+   inside the same scrolling sidebar column. */
+.portfolio-panel {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.portfolio-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.portfolio-title {
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.portfolio-items {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.portfolio-empty {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  padding: 4px 2px;
+}
+
+.portfolio-item {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  background: white;
+}
+
+.portfolio-item.priority-high {
+  border-color: var(--lf-red);
+  background: #fdf2f2;
+}
+
+.portfolio-item-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.portfolio-item-label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-main);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.portfolio-item-date {
+  font-size: 10.5px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.portfolio-item-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.portfolio-badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 999px;
+}
+
+.portfolio-badge.status-open {
+  background: #eaf1fb;
+  color: var(--lf-blue-dark);
+}
+
+.portfolio-badge.status-done {
+  background: #e7f5ee;
+  color: var(--lf-green);
+}
+
+.portfolio-badge.status-high {
+  background: var(--lf-red);
+  color: white;
+}
+
+.portfolio-case-id {
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+
 .brand {
   cursor: pointer;
   display: flex;
@@ -712,6 +824,74 @@ body {
 
 .inline-form button[type="submit"] {
   align-self: flex-start;
+}
+
+/* Fraud/dispute transaction picker - a real table with a checkbox per row
+   instead of a plain numbered text list, so several suspicious charges can
+   be flagged in one go. See addTransactionSelectForm in app.js. */
+.txn-select-form {
+  max-width: 100%;
+  width: 620px;
+}
+
+.txn-select-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.txn-select-table th {
+  text-align: left;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding: 0 8px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.txn-select-table td {
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-main);
+}
+
+.txn-select-table tbody tr {
+  cursor: pointer;
+}
+
+.txn-select-table tbody tr:nth-child(even) {
+  background: var(--bg);
+}
+
+.txn-select-table tbody tr:hover {
+  background: #eef3f8;
+}
+
+.txn-select-table tbody tr.selected {
+  background: #fdf2f2;
+}
+
+.txn-select-table tbody tr.selected td {
+  font-weight: 600;
+}
+
+.txn-select-table input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+.txn-select-amount {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.inline-form.txn-select-form button[type="submit"]:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .msg-label {

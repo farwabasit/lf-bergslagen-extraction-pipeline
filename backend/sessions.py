@@ -14,7 +14,8 @@ class SessionStore:
 
     def get_or_create(self, session_id: str) -> dict:
         return self._sessions.setdefault(
-            session_id, {"messages": [], "needs_human": False, "assigned_agent": None}
+            session_id,
+            {"messages": [], "needs_human": False, "assigned_agent": None, "verified_customer_id": None},
         )
 
     def add_message(self, session_id: str, role: str, content: str, agent_name: str | None = None) -> int:
@@ -30,6 +31,18 @@ class SessionStore:
 
     def assign_agent(self, session_id: str, agent_name: str) -> None:
         self.get_or_create(session_id)["assigned_agent"] = agent_name
+
+    def set_verified_customer(self, session_id: str, customer_id: str) -> None:
+        """Remembers that THIS browser session verified as this customer, so
+        a later request for the interaction-history panel (which only sends
+        session_id, not a password) can be checked against it instead of
+        trusting a customer_id the client claims - see
+        /api/sessions/{session_id}/interaction-history in main.py."""
+        self.get_or_create(session_id)["verified_customer_id"] = customer_id
+
+    def get_verified_customer(self, session_id: str) -> str | None:
+        session = self._sessions.get(session_id)
+        return session["verified_customer_id"] if session else None
 
     def messages_after(self, session_id: str, after: int) -> list[dict]:
         messages = self.get_or_create(session_id)["messages"]

@@ -106,6 +106,40 @@ body {
   background: rgba(255, 255, 255, 0.25);
 }
 
+/* --- RBAC role switcher: self-declared, same demo-scope convention as
+   cs-service's X-CS-Role - see backend/roles.py. --- */
+
+.role-switcher {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #cfd9e4;
+}
+
+.role-switcher select {
+  background: rgba(255, 255, 255, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  color: white;
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-size: 12.5px;
+}
+
+.role-switcher select option {
+  color: var(--text-main);
+}
+
+.no-access-hint {
+  background: var(--card-bg);
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  padding: 30px 20px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13.5px;
+}
+
 .shell {
   max-width: 1180px;
   margin: 0 auto;
@@ -536,4 +570,157 @@ body {
 
 .audit-modal-close:hover {
   color: var(--text-main);
+}
+
+/* --- Agent performance additions: token-by-topic trend, satisfaction/
+   latency correlation --- */
+
+.panel-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: -8px 0 14px;
+}
+
+.token-trend-table {
+  overflow-x: auto;
+}
+
+.token-trend-inner {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.token-trend-inner th,
+.token-trend-inner td {
+  padding: 7px 9px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.token-trend-inner th:first-child,
+.token-trend-inner td:first-child {
+  text-align: left;
+}
+
+.token-trend-inner thead th {
+  color: var(--text-muted);
+  font-weight: 600;
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  border-bottom: 1px solid var(--border);
+}
+
+.token-trend-topic {
+  color: var(--text-main);
+  font-weight: 600;
+}
+
+.token-trend-total {
+  color: var(--lf-blue-dark);
+  font-weight: 700;
+  border-left: 2px solid var(--border);
+}
+
+.correlation-stat {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 10px;
+}
+
+.correlation-value {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--lf-blue-dark);
+}
+
+.correlation-label {
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.correlation-chart {
+  height: 120px;
+}
+
+/* --- Contact Rules (Marketing) --- */
+
+.cooldown-form {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.cooldown-form input[type="number"] {
+  width: 100px;
+  padding: 7px 9px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  font-size: 13.5px;
+}
+
+.cooldown-unit {
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+.cooldown-form button,
+.save-tier-btn {
+  background: var(--lf-blue);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  padding: 7px 16px;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.cooldown-form button:hover,
+.save-tier-btn:hover {
+  background: var(--lf-blue-dark);
+}
+
+.rule-status {
+  font-size: 12px;
+  color: var(--lf-green);
+  min-width: 70px;
+}
+
+.offer-rules-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+
+.offer-rules-table th,
+.offer-rules-table td {
+  padding: 10px 9px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.offer-rules-table th {
+  color: var(--text-muted);
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.tier-checkbox-group {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.tier-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
 }

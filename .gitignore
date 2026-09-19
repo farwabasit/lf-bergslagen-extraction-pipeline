@@ -16,3 +16,6 @@ backend/nba.db
 # Java build output
 cs-service/target/
 
+# Local Java runtime database
+cs-service/data/
+

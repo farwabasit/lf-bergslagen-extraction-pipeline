@@ -65,7 +65,7 @@ LOAN_PROMISE_RESOLVED_MARKERS = (
     "unable to proceed with this loan promise application",
 )
 LOAN_OFFER_RESOLVED_MARKERS = (
-    "Loan Offer for",
+    "eligible for the loan",
     "loan offer application has been sent to a Customer Advisor",
     "unable to proceed with this loan offer application",
 )
@@ -201,13 +201,61 @@ def _loan_offer_intro_shown(history: list[dict]) -> bool:
     )
 
 
+# Second confirmation gate, after all 3 documents are attached and before
+# extraction/credit assessment actually runs: uploading a document isn't
+# the same as saying "go ahead and process this" - the customer should get
+# one explicit chance to confirm before the pipeline (identity re-check,
+# document extraction, credit assessment, and a possible Advisor/Operations
+# case) actually fires. Deterministic text, same reasoning as the intro gate.
+LOAN_OFFER_DOCS_CONFIRM_MARKER = "Would you like me to go ahead and process your Loan Offer application now?"
+LOAN_OFFER_DOCS_CONFIRM_MARKER_SV = "Vill du att jag går vidare och behandlar din ansökan om låneerbjudande nu?"
+LOAN_OFFER_DOCS_CONFIRM_TEXT = {
+    "en": (
+        "Thanks - I've received all three documents (Purchase Agreement, Income "
+        "Statement, and Expense details). Processing your application means "
+        "re-verifying your identity, extracting and checking the documents, and "
+        "running a credit assessment against LF Bergslagen's lending guidelines.\n\n"
+        f"{LOAN_OFFER_DOCS_CONFIRM_MARKER}"
+    ),
+    "sv": (
+        "Tack - jag har tagit emot alla tre dokument (köpekontrakt, "
+        "inkomstuppgift och utgiftsuppgifter). Att behandla din ansökan innebär "
+        "att vi verifierar din identitet igen, granskar dokumenten och gör en "
+        "kreditbedömning enligt LF Bergslagens låneriktlinjer.\n\n"
+        f"{LOAN_OFFER_DOCS_CONFIRM_MARKER_SV}"
+    ),
+}
+LOAN_OFFER_DOCS_CONFIRM_SUGGESTIONS = {
+    "en": ["Yes, go ahead", "Not yet"],
+    "sv": ["Ja, gå vidare", "Inte än"],
+}
+
+
+def _loan_offer_docs_confirm_shown(history: list[dict]) -> bool:
+    return any(
+        m.get("role") == "assistant"
+        and (LOAN_OFFER_DOCS_CONFIRM_MARKER in (m.get("content") or "") or LOAN_OFFER_DOCS_CONFIRM_MARKER_SV in (m.get("content") or ""))
+        for m in history
+    )
+
+
 def wants_loan_promise_application(history: list[dict]) -> bool:
     combined = " ".join(m.get("content", "") for m in history if m.get("role") == "user").lower()
+    # "loan promise"/"lånelöfte" on its own is checked first and separately
+    # from the full LOAN_PROMISE_KEYWORDS phrases below: a suggestion chip
+    # or a customer's own wording varies ("Apply for mortgage loan promise",
+    # "I'd like the loan promise please", ...) far more than a fixed phrase
+    # list can enumerate, but the product name itself is specific enough
+    # (never used to mean anything else in this app) to trigger on alone.
+    if "loan promise" in combined or "lånelöfte" in combined:
+        return True
     return any(kw in combined for kw in LOAN_PROMISE_KEYWORDS)
 
 
 def wants_loan_offer_application(history: list[dict]) -> bool:
     combined = " ".join(m.get("content", "") for m in history if m.get("role") == "user").lower()
+    if "loan offer" in combined or "låneerbjudande" in combined:
+        return True
     return any(kw in combined for kw in LOAN_OFFER_KEYWORDS)
 
 
@@ -397,12 +445,15 @@ general knowledge, even if it looks plausible.
    for whichever are still missing. Never invent or guess at a different
    URL - only the fetched page's own URL.
 
-3. As soon as identity info AND all 3 attached documents are present,
-   proceed immediately - do NOT ask about purchase price or loan amount
-   again first, those are resolved inside the pipeline below (extraction
-   gives the price; no stated amount means the 85% default is used
-   automatically). This triggers the Credit Assessment process - run it via
-   tool calls, in order, within this same reply:
+3. Once identity info AND all 3 attached documents are present, do NOT
+   run anything yet and do NOT ask about purchase price or loan amount
+   (those are resolved inside the pipeline below - extraction gives the
+   price; no stated amount means the 85% default is used automatically).
+   A system message will tell you when the customer has confirmed they
+   want you to proceed with processing - only once you see that
+   confirmation does this step's pipeline run. Once confirmed, this
+   triggers the Credit Assessment process - run it via tool calls, in
+   order, within this same reply:
    a. verify_customer_identity - never assume verified from an earlier turn,
       tool results aren't kept between turns, always call it fresh here.
    b. extract_mortgage_documents (the Document Extraction & Verification
@@ -473,19 +524,22 @@ general knowledge, even if it looks plausible.
    d. fetch_interest_rate for this customer.
    e. calculate_loan_terms using the loan amount and the final_interest_rate_percent
       fetch_interest_rate just returned.
-   f. Write out a clearly formatted Loan Offer directly in your reply - a
-      heading containing the exact phrase "Loan Offer for" followed by the
-      property address, then: applicant name, property address (from the
-      extracted purchase agreement), purchase price, loan amount, interest
-      rate (show the market base rate + tier spread + final rate
-      breakdown), amortization term in years, monthly payment, and a line
-      stating "This loan offer is valid for 30 days from today." Use ONLY
-      numbers that came from tool results - never estimate or round on your
-      own. Still never mention credit score, DTI, LTV, or the internal
-      recommendation here.
+   f. Do NOT write out a detailed rate/payment letter to the customer - the
+      exact interest rate, monthly payment, and amortization figures you
+      just calculated are for the Operations case (trigger_operations_case
+      below already receives them), not for reciting in chat. Instead, in
+      your reply tell the customer plainly, in this shape: that based on
+      the information provided, she is eligible for the loan as per LF
+      Bergslagen's guidelines, and that further processing is now needed to
+      finalize things. You may name the property address and confirm the
+      loan amount for her own reference, but never state the interest rate,
+      monthly payment, credit score, DTI, LTV, or the internal
+      recommendation. Include the exact phrase "eligible for the loan"
+      somewhere in the sentence.
    g. trigger_operations_case to hand off for e-signature, account opening,
-      and settlement/disbursement. State the case ID it returns and mention
-      these operational steps are being progressively automated too.
+      and settlement/disbursement. State the case ID it returns as part of
+      the same reply as step f (not a separate message), and mention these
+      operational steps are being progressively automated too.
 
 RULES THROUGHOUT:
 - Never invent a case ID, customer_id, interest rate, or any calculated
@@ -970,33 +1024,52 @@ def run_loan_offer_agent(history: list[dict], lang: str | None = None) -> tuple[
     if not _loan_offer_intro_shown(history):
         return LOAN_OFFER_INTRO_TEXT[key], LOAN_OFFER_INTRO_SUGGESTIONS[key], {}
 
-    if not _wants_to_proceed(history):
-        not_now_text = {
-            "en": "No problem - just let me know whenever you're ready to apply for your Loan Offer.",
-            "sv": "Inga problem - säg bara till när du är redo att ansöka om ditt låneerbjudande.",
-        }
-        return not_now_text[key], [], {}
-
     has_identity_hint = bool(re.search(r"\d{6,8}[-\s]?\d{4}", " ".join(
         m.get("content", "") for m in history if m.get("role") == "user"
     )))
 
     if not has_identity_hint:
+        # This "decline" check only makes sense right after the intro -
+        # scoped to here (not evaluated on every later turn) so an
+        # unrelated "not yet" much later in the conversation (e.g. while
+        # deciding whether to process the uploaded documents) can't be
+        # misread as declining the intro itself.
+        if not _wants_to_proceed(history):
+            not_now_text = {
+                "en": "No problem - just let me know whenever you're ready to apply for your Loan Offer.",
+                "sv": "Inga problem - säg bara till när du är redo att ansöka om ditt låneerbjudande.",
+            }
+            return not_now_text[key], [], {}
         return ASK_IDENTITY_TEXT["loan_offer"][key], [], {"form": IDENTITY_FORM}
+
+    documents_attached = len(_extract_attached_documents(history))
+
+    # Second confirmation gate: having all 3 documents attached isn't the
+    # same as the customer saying "go ahead and process this now" - ask
+    # once, deterministically, before the pipeline (re-verification,
+    # extraction, credit assessment, and a possible case) actually runs.
+    if documents_attached >= 3:
+        if not _loan_offer_docs_confirm_shown(history):
+            return LOAN_OFFER_DOCS_CONFIRM_TEXT[key], LOAN_OFFER_DOCS_CONFIRM_SUGGESTIONS[key], {}
+        if not _wants_to_proceed(history):
+            not_now_processing_text = {
+                "en": "No problem - your documents are saved here. Just let me know when you'd like me to go ahead.",
+                "sv": "Inga problem - dina dokument finns kvar här. Säg bara till när du vill att jag går vidare.",
+            }
+            return not_now_processing_text[key], [], {}
 
     messages = [{"role": "system", "content": LOAN_OFFER_SYSTEM_PROMPT}]
     messages.extend(history)
-
-    documents_attached = len(_extract_attached_documents(history))
 
     if documents_attached >= 3:
         messages.append({
             "role": "system",
             "content": (
-                "All prerequisites are present (identity details and 3 attached documents). "
+                "All prerequisites are present (identity details, 3 attached documents) AND "
+                "the customer has just confirmed they want you to proceed with processing. "
                 "In THIS reply, run the full pipeline via tool calls as described in step 3 of "
-                "your instructions, ending with either a Loan Offer, a review hand-off, or a "
-                "decline. Do NOT ask the customer to confirm the purchase price or a loan "
+                "your instructions, ending with either the eligibility message, a review hand-off, "
+                "or a decline. Do NOT ask the customer to confirm the purchase price or a loan "
                 "amount first - extract_mortgage_documents will give you the price, and if no "
                 "specific loan amount was stated anywhere in this conversation, use 85% of "
                 "that price automatically. Do not just ask another clarifying question. If "
