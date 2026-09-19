@@ -30,6 +30,9 @@ const progressRingPercentEl = document.getElementById("progress-ring-percent");
 const progressRingTitleEl = document.getElementById("progress-ring-title");
 const progressStepsEl = document.getElementById("progress-steps");
 const PROGRESS_RING_CIRCUMFERENCE = 2 * Math.PI * 28;
+const portfolioPanelEl = document.getElementById("portfolio-panel");
+const portfolioTitleEl = document.getElementById("portfolio-title");
+const portfolioItemsEl = document.getElementById("portfolio-items");
 
 // The toggle sets the UI language and is a fallback for ambiguous messages,
 // but the backend still matches whatever language the user actually types
@@ -64,6 +67,10 @@ const I18N = {
     rateThanks: "Thanks for your feedback!",
     offersHeading: "You might also be interested in",
     topicPrompt: "Not sure where to start? Choose a topic",
+    portfolioTitle: "Your activity",
+    portfolioEmpty: "Nothing here yet.",
+    portfolioUrgent: "Urgent",
+    portfolioCompleted: "Completed",
     chips: [
       { label: "Buying a house", text: "I'd like help with buying a house" },
       { label: "Moving in together", text: "My partner and I are moving in together" },
@@ -110,6 +117,10 @@ const I18N = {
     rateThanks: "Tack för din feedback!",
     offersHeading: "Detta kan också intressera dig",
     topicPrompt: "Osäker på var du ska börja? Välj ett ämne",
+    portfolioTitle: "Din aktivitet",
+    portfolioEmpty: "Inget här ännu.",
+    portfolioUrgent: "Brådskande",
+    portfolioCompleted: "Klart",
     chips: [
       { label: "Köpa hus", text: "Jag skulle vilja ha hjälp med att köpa hus" },
       { label: "Flytta ihop", text: "Min partner och jag ska flytta ihop" },
@@ -154,6 +165,7 @@ function applyLanguage(lang) {
   chatSearchInputEl.placeholder = strings.chatSearchPlaceholder;
   renderChatList();
   if (!ratingSubmitted) ratingLabelEl.textContent = strings.rateLabel;
+  portfolioTitleEl.textContent = strings.portfolioTitle;
 
   chipsEl.innerHTML = "";
   const dropdown = document.createElement("div");
@@ -443,7 +455,12 @@ function renderMarkdown(raw) {
       listType = "ol";
       listItems.push(numbered[1]);
     } else if (line === "") {
-      flushList();
+      // Deliberately does NOT flush the list here: an LLM commonly puts a
+      // blank line between numbered/bulleted items for readability, and
+      // flushing on every one of those would split one list into a run of
+      // single-item lists (each starting back at "1."). The list closes
+      // naturally below, when real non-list content follows, or via the
+      // final flushList() once the message ends.
       flushPara();
     } else {
       flushList();
@@ -820,6 +837,83 @@ function addFormSaveError() {
   messagesEl.scrollTop = messagesEl.scrollHeight;
 }
 
+// --- Interaction-history panel (left sidebar) ---
+//
+// Shown once this browser session has verified a customer's identity (see
+// verify_customer_identity in backend/tools.py). Backed by
+// GET /api/sessions/{sessionId}/interaction-history, which only returns
+// data if the SERVER remembers this session_id as verified - the panel
+// never sends or trusts a customer_id itself, so switching to a chat that
+// was never verified in this browser just hides the panel instead of
+// showing someone else's history.
+function formatPortfolioDate(iso) {
+  if (!iso) return "";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleDateString(currentLang === "sv" ? "sv-SE" : "en-US", {
+    month: "short",
+    day: "numeric",
+  });
+}
+
+function renderPortfolio(items) {
+  portfolioItemsEl.innerHTML = "";
+
+  if (!items || !items.length) {
+    const empty = document.createElement("div");
+    empty.className = "portfolio-empty";
+    empty.textContent = t().portfolioEmpty;
+    portfolioItemsEl.appendChild(empty);
+    return;
+  }
+
+  for (const item of items) {
+    const card = document.createElement("div");
+    card.className = "portfolio-item" + (item.priority === "high" ? " priority-high" : "");
+
+    let badgeHtml = "";
+    if (item.priority === "high") {
+      badgeHtml = `<span class="portfolio-badge status-high">${escapeHtml(t().portfolioUrgent)}</span>`;
+    } else if (item.priority === "done") {
+      badgeHtml = `<span class="portfolio-badge status-done">${escapeHtml(t().portfolioCompleted)}</span>`;
+    } else if (item.priority === "open" && item.status_label) {
+      badgeHtml = `<span class="portfolio-badge status-open">${escapeHtml(item.status_label)}</span>`;
+    }
+
+    card.innerHTML = `
+      <div class="portfolio-item-top">
+        <span class="portfolio-item-label" title="${escapeHtml(item.label)}">${escapeHtml(item.label)}</span>
+        <span class="portfolio-item-date">${escapeHtml(formatPortfolioDate(item.date))}</span>
+      </div>
+      <div class="portfolio-item-meta">
+        ${badgeHtml}
+        ${item.case_id ? `<span class="portfolio-case-id">${escapeHtml(item.case_id)}</span>` : ""}
+      </div>
+    `;
+    portfolioItemsEl.appendChild(card);
+  }
+}
+
+async function refreshPortfolioPanel() {
+  try {
+    const res = await fetch(`/api/sessions/${sessionId}/interaction-history`);
+    if (!res.ok) {
+      portfolioPanelEl.hidden = true;
+      return;
+    }
+    const data = await res.json();
+    if (!data.verified) {
+      portfolioPanelEl.hidden = true;
+      return;
+    }
+    portfolioPanelEl.hidden = false;
+    renderPortfolio(data.items);
+  } catch (err) {
+    console.error(err);
+    portfolioPanelEl.hidden = true;
+  }
+}
+
 // --- Inline structured form (e.g. fraud/dispute follow-up questions) ---
 //
 // The backend can't reliably free-parse an answer to "suspected place of
@@ -848,6 +942,111 @@ const FORM_FIELD_ANSWER_PREFIX = {
 const FORM_CONFIRM_REPLY_RE = /(handl[äa]ggare|case officer|redo f[öo]r granskning|ready for review)/i;
 const FORM_CONFIRM_RE = /\b(yes|that'?s (correct|right)|looks good|looks right|submit|confirmed?|tack|det st[äa]mmer|ja)\b/i;
 const FORM_CHANGE_RE = /\b(change|update|fix|wrong|incorrect|[äa]ndra|byt|fel|uppdatera)\b/i;
+
+function renderForm(form) {
+  if (!form) return;
+  if (form.type === "auth_choice") {
+    addAuthChoice(form);
+  } else if (form.type === "transaction_select") {
+    addTransactionSelectForm(form);
+  } else {
+    addForm(form);
+  }
+}
+
+// Fraud/dispute transaction picker: a real table with a checkbox per row,
+// so the customer can flag one or several suspicious charges at once,
+// instead of typing a row number or Transaction ID from a plain-text list.
+// Submitting composes "Selected transactions: TXN-..., TXN-..." - the exact
+// phrase backend/agents/fraud_dispute_agent.py's SELECTED_TXN_RE expects.
+function addTransactionSelectForm(form) {
+  if (!form || !form.transactions || !form.transactions.length) return;
+
+  const wrapper = document.createElement("form");
+  wrapper.className = "inline-form txn-select-form";
+
+  const table = document.createElement("table");
+  table.className = "txn-select-table";
+  table.innerHTML = `
+    <thead>
+      <tr><th></th><th>Date</th><th>Merchant</th><th>Amount</th></tr>
+    </thead>
+  `;
+  const tbody = document.createElement("tbody");
+
+  const checkboxes = [];
+  for (const txn of form.transactions) {
+    const row = document.createElement("tr");
+
+    const checkboxCell = document.createElement("td");
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.value = txn.id;
+    checkbox.id = `txn-${txn.id}`;
+    checkboxes.push(checkbox);
+    checkboxCell.appendChild(checkbox);
+    row.appendChild(checkboxCell);
+
+    const dateCell = document.createElement("td");
+    dateCell.textContent = txn.date;
+    row.appendChild(dateCell);
+
+    const merchantCell = document.createElement("td");
+    merchantCell.textContent = txn.merchant;
+    row.appendChild(merchantCell);
+
+    const amountCell = document.createElement("td");
+    amountCell.textContent = txn.amount;
+    amountCell.className = "txn-select-amount";
+    row.appendChild(amountCell);
+
+    row.addEventListener("click", (e) => {
+      if (e.target !== checkbox) {
+        checkbox.checked = !checkbox.checked;
+      }
+      row.classList.toggle("selected", checkbox.checked);
+      updateSubmitState();
+    });
+    checkbox.addEventListener("click", (e) => e.stopPropagation());
+    checkbox.addEventListener("change", () => {
+      row.classList.toggle("selected", checkbox.checked);
+      updateSubmitState();
+    });
+
+    tbody.appendChild(row);
+  }
+  table.appendChild(tbody);
+  wrapper.appendChild(table);
+
+  const errorEl = document.createElement("p");
+  errorEl.className = "inline-form-error";
+  wrapper.appendChild(errorEl);
+
+  const submitBtn = document.createElement("button");
+  submitBtn.type = "submit";
+  submitBtn.textContent = "Dispute selected transactions";
+  submitBtn.disabled = true;
+  wrapper.appendChild(submitBtn);
+
+  function updateSubmitState() {
+    submitBtn.disabled = !checkboxes.some((cb) => cb.checked);
+    errorEl.textContent = "";
+  }
+
+  wrapper.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const selectedIds = checkboxes.filter((cb) => cb.checked).map((cb) => cb.value);
+    if (!selectedIds.length) {
+      errorEl.textContent = "Select at least one transaction.";
+      return;
+    }
+    wrapper.remove();
+    sendMessage(`Selected transactions: ${selectedIds.join(", ")}`);
+  });
+
+  messagesEl.appendChild(wrapper);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
 
 function addForm(form) {
   if (!form || !form.fields || !form.fields.length) return;
@@ -1393,10 +1592,8 @@ async function getAssistantReply() {
       // confirmation turn even though nothing changed -- treat the reply as
       // the confirmation it is instead of popping up a duplicate form.
       activeForm.markSubmitted();
-    } else if (data.form && data.form.type === "auth_choice") {
-      addAuthChoice(data.form);
     } else {
-      addForm(data.form);
+      renderForm(data.form);
     }
     addOffers(data.offers, data.offers_customer_id);
     addComparisonTable(data.comparison_table);
@@ -1410,6 +1607,7 @@ async function getAssistantReply() {
     }
     loadPlan();
     showRatingBar();
+    refreshPortfolioPanel();
   } catch (err) {
     pending.textContent = t().chatError;
     pending.className = "msg assistant";
@@ -1917,6 +2115,7 @@ function startNewChat() {
   chatSearchInputEl.value = "";
   renderEmptyPlan();
   renderChatList();
+  portfolioPanelEl.hidden = true;
 }
 
 function parseUserMessageContent(content) {
@@ -2010,6 +2209,7 @@ async function loadChat(id) {
     }
     await loadPlan();
     renderChatList();
+    refreshPortfolioPanel();
   } catch (err) {
     console.error(err);
   }
@@ -2054,3 +2254,4 @@ setSidebarCollapsed(localStorage.getItem("ltn-sidebar-collapsed") === "1");
 applyLanguage(currentLang);
 renderChatList();
 loadPlan();
+refreshPortfolioPanel();

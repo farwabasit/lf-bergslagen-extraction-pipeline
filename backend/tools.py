@@ -649,12 +649,27 @@ def verify_customer_by_personnummer(personnummer: str) -> dict | None:
 
 
 def get_customer_portfolio(customer_id: str) -> str:
-    """List a verified customer's current LF Bergslagen products."""
+    """List a verified customer's current LF Bergslagen products, with
+    each product's size, specific plan/fund name, and other useful details
+    (a mortgage's rate/tenure/maturity, a policy's renewal date, etc.) -
+    see knowledge.MOCK_CUSTOMERS for the structured data this reads."""
     customer = _find_customer(customer_id)
     if not customer:
         return f"Unknown customer_id '{customer_id}'."
-    lines = "\n".join(f"- {p}" for p in customer["portfolio"])
-    return f"Current products for {customer['name']}:\n{lines}"
+
+    lines = []
+    for product in customer["portfolio"]:
+        header = product["name"]
+        if product.get("product_type"):
+            header += f" — {product['product_type']}"
+        if product.get("size"):
+            header += f" ({product['size']})"
+        lines.append(f"- {header}")
+        for key, value in (product.get("details") or {}).items():
+            label = key.replace("_", " ").capitalize()
+            lines.append(f"    {label}: {value}")
+
+    return f"Current products for {customer['name']}:\n" + "\n".join(lines)
 
 
 def request_callback(name: str, phone: str, preferred_time: str = "") -> str:

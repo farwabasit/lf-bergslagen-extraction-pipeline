@@ -18,6 +18,7 @@ with for the recommended hosted option and why.
 """
 
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from sqlalchemy import (
     Boolean,
@@ -33,6 +34,7 @@ from sqlalchemy import (
     inspect,
     text,
 )
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from . import config
@@ -73,6 +75,31 @@ class OfferStat(Base):
     offer_code = Column(String(64), primary_key=True)
     alpha = Column(Float, nullable=False, default=1.0)
     beta = Column(Float, nullable=False, default=1.0)
+
+
+class ContactRuleSettings(Base):
+    """Marketing-editable Contact Rules that used to be hardcoded constants
+    in nba_engine.py - a singleton row (id=1) so every process reads the
+    SAME live settings from the shared database instead of whatever value
+    was baked in at import time on whichever machine happens to be running.
+    See /api/contact-rules in main.py (MARKETING role only)."""
+
+    __tablename__ = "contact_rule_settings"
+
+    id = Column(Integer, primary_key=True)
+    offer_click_cooldown_seconds = Column(Integer, nullable=False, default=120)
+
+
+class OfferTierRestriction(Base):
+    """Presence of a (offer_code, tier) row means that offer IS eligible
+    for that customer tier. An offer with NO rows at all is eligible for
+    every tier (the default, unrestricted, backward-compatible state) -
+    see nba_engine.get_offers_for_customer."""
+
+    __tablename__ = "offer_tier_restrictions"
+
+    offer_code = Column(String(64), primary_key=True)
+    tier = Column(String(32), primary_key=True)
 
 
 class OfferEvent(Base):
@@ -126,12 +153,34 @@ class ChatMessage(Base):
     ts = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
 
 
-_engine = create_engine(config.DATABASE_URL, pool_pre_ping=True)
+def _local_sqlite_url() -> str:
+    return "sqlite:///" + str(Path(__file__).resolve().parent / "nba.db")
+
+
+def _make_engine(database_url: str):
+    connect_args = {}
+    if database_url.startswith(("postgresql://", "postgresql+")):
+        # Keep a bad/unreachable hosted DB from blocking the whole API startup.
+        connect_args["connect_timeout"] = 3
+    return create_engine(database_url, pool_pre_ping=True, connect_args=connect_args)
+
+
+_engine = _make_engine(config.DATABASE_URL)
 _SessionLocal = sessionmaker(bind=_engine)
 
 
 def init_db() -> None:
-    Base.metadata.create_all(_engine)
+    global _engine, _SessionLocal
+    try:
+        Base.metadata.create_all(_engine)
+    except SQLAlchemyError:
+        if config.DATABASE_URL.startswith("sqlite:///"):
+            raise
+        fallback_url = _local_sqlite_url()
+        _engine = _make_engine(fallback_url)
+        _SessionLocal.configure(bind=_engine)
+        Base.metadata.create_all(_engine)
+
     # create_all only creates missing TABLES, not missing columns on a table
     # that already existed from before verified_customer_id was added here -
     # patch it in for anyone with an existing local chat_sessions.db.
@@ -165,6 +214,51 @@ def get_customer_topics(customer_id: str, lookback_days: int = 180) -> set[str]:
         rows = (
             db.query(CustomerInteraction.topic)
             .filter(CustomerInteraction.customer_id == customer_id, CustomerInteraction.ts >= since)
+            .distinct()
+            .all()
+        )
+        return {r[0] for r in rows}
+
+
+def get_customer_interactions(customer_id: str, limit: int = 25) -> list[dict]:
+    """Most recent interactions for one customer - the raw material for the
+    chat widget's interaction-history panel (see interaction_history.py),
+    which turns this into a customer-friendly mini-portfolio view."""
+    with _session() as db:
+        rows = (
+            db.query(CustomerInteraction)
+            .filter(CustomerInteraction.customer_id == customer_id)
+            .order_by(CustomerInteraction.ts.desc())
+            .limit(limit)
+            .all()
+        )
+        return [
+            {
+                "topic": r.topic,
+                "case_id": r.case_id,
+                "session_id": r.session_id,
+                "ts": r.ts,
+            }
+            for r in rows
+        ]
+
+
+def get_recently_clicked_offer_codes(customer_id: str, within_seconds: int = 120) -> set[str]:
+    """Offer codes this customer clicked within the last `within_seconds` -
+    used to suppress re-showing the exact same offer right after they just
+    clicked it (e.g. they open a new chat a minute later). A short, fixed
+    cooldown rather than a permanent "never show again": the click is a
+    positive signal (already counted via alpha in offer_stats), not a
+    request to stop seeing it forever."""
+    since = datetime.now(timezone.utc) - timedelta(seconds=within_seconds)
+    with _session() as db:
+        rows = (
+            db.query(OfferEvent.offer_code)
+            .filter(
+                OfferEvent.customer_id == customer_id,
+                OfferEvent.event_type == "click",
+                OfferEvent.ts >= since,
+            )
             .distinct()
             .all()
         )
@@ -379,3 +473,51 @@ def list_chat_session_summaries() -> list[dict]:
             })
         summaries.sort(key=lambda s: s["last_ts"], reverse=True)
         return summaries
+
+
+# --- Contact Rules (Marketing role, see /api/contact-rules in main.py) ----
+
+DEFAULT_OFFER_CLICK_COOLDOWN_SECONDS = 120
+
+
+def get_cooldown_seconds() -> int:
+    with _session() as db:
+        row = db.get(ContactRuleSettings, 1)
+        if row is None:
+            row = ContactRuleSettings(id=1, offer_click_cooldown_seconds=DEFAULT_OFFER_CLICK_COOLDOWN_SECONDS)
+            db.add(row)
+            db.commit()
+        return row.offer_click_cooldown_seconds
+
+
+def set_cooldown_seconds(seconds: int) -> None:
+    with _session() as db:
+        row = db.get(ContactRuleSettings, 1)
+        if row is None:
+            row = ContactRuleSettings(id=1, offer_click_cooldown_seconds=seconds)
+            db.add(row)
+        else:
+            row.offer_click_cooldown_seconds = seconds
+        db.commit()
+
+
+def get_offer_tier_restrictions() -> dict[str, list[str]]:
+    """offer_code -> list of tiers it's eligible for. An offer with no key
+    here has no restriction (eligible for every tier) - see
+    OfferTierRestriction's docstring."""
+    with _session() as db:
+        rows = db.query(OfferTierRestriction).all()
+        result: dict[str, list[str]] = {}
+        for row in rows:
+            result.setdefault(row.offer_code, []).append(row.tier)
+        return result
+
+
+def set_offer_tier_restrictions(offer_code: str, tiers: list[str]) -> None:
+    """Replaces the full set of eligible tiers for one offer. An empty
+    list removes the restriction entirely (eligible for every tier again)."""
+    with _session() as db:
+        db.query(OfferTierRestriction).filter(OfferTierRestriction.offer_code == offer_code).delete()
+        for tier in tiers:
+            db.add(OfferTierRestriction(offer_code=offer_code, tier=tier))
+        db.commit()

@@ -22,6 +22,17 @@ class SessionStore:
     def assign_agent(self, session_id: str, agent_name: str) -> None:
         db.set_chat_assigned_agent(session_id, agent_name)
 
+    def set_verified_customer(self, session_id: str, customer_id: str) -> None:
+        """Remembers that THIS browser session verified as this customer, so
+        a later request for the interaction-history panel (which only sends
+        session_id, not a password) can be checked against it instead of
+        trusting a customer_id the client claims - see
+        /api/sessions/{session_id}/interaction-history in main.py."""
+        db.set_chat_verified_customer(session_id, customer_id)
+
+    def get_verified_customer(self, session_id: str) -> str | None:
+        return db.get_chat_verified_customer(session_id)
+
     def messages_after(self, session_id: str, after: int) -> list[dict]:
         return db.get_chat_messages_after(session_id, after)
 
