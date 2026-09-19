@@ -598,6 +598,46 @@ body.sidebar-collapsed .chat-shell {
   white-space: nowrap;
 }
 
+.document-review-card {
+  align-self: flex-start;
+  width: min(100%, 520px);
+  padding: 12px 14px;
+  border: 1px solid #c9dce9;
+  border-left: 4px solid var(--lf-blue);
+  border-radius: 8px;
+  background: #f5f9fc;
+  color: var(--text-main);
+  font-size: 12px;
+}
+
+.document-review-card strong {
+  display: block;
+  color: var(--lf-blue-dark);
+  margin-bottom: 8px;
+}
+
+.document-review-card dl {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 5px 16px;
+  margin: 0;
+}
+
+.document-review-card dt,
+.document-review-card dd {
+  margin: 0;
+}
+
+.document-review-card dd {
+  font-weight: 700;
+  text-align: right;
+}
+
+.document-review-card p {
+  margin: 8px 0 0;
+  color: var(--text-muted);
+}
+
 @media (max-width: 480px) {
   .progress-step-label {
     display: none;

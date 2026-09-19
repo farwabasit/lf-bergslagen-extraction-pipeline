@@ -1218,6 +1218,52 @@ function updateProgressRing(progress) {
   });
 }
 
+function addDocumentReview(review) {
+  if (!review) return;
+
+  const wrapper = document.createElement("div");
+  wrapper.className = "document-review-card";
+
+  const heading = document.createElement("strong");
+  heading.textContent = review.needs_review ? "Documents need review" : "Documents read and verified";
+  wrapper.appendChild(heading);
+
+  const income = review.income_statement || {};
+  const expenses = review.expenses || {};
+  const rows = [
+    ["Monthly gross income", income.monthly_gross_income_sek, "SEK"],
+    ["Monthly expenses", expenses.monthly_expenses_total_sek, "SEK"],
+    ["Employment", income.employment_type, ""],
+  ].filter(([, value]) => value !== null && value !== undefined && value !== "");
+
+  if (rows.length) {
+    const list = document.createElement("dl");
+    for (const [label, value, suffix] of rows) {
+      const term = document.createElement("dt");
+      term.textContent = label;
+      const detail = document.createElement("dd");
+      detail.textContent = `${value}${suffix ? ` ${suffix}` : ""}`;
+      list.append(term, detail);
+    }
+    wrapper.appendChild(list);
+  }
+
+  if (review.needs_review && review.review_reason) {
+    const note = document.createElement("p");
+    note.textContent = review.review_reason;
+    wrapper.appendChild(note);
+  }
+
+  if (review.unclassified_documents && review.unclassified_documents.length) {
+    const note = document.createElement("p");
+    note.textContent = `Could not classify: ${review.unclassified_documents.join(", ")}`;
+    wrapper.appendChild(note);
+  }
+
+  messagesEl.appendChild(wrapper);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
 // --- Satisfaction rating: a small, optional "how helpful was this chat"
 // star control. Never blocks the conversation - it just becomes visible
 // once there's been at least one reply, and can be clicked at any time. ---
@@ -1315,6 +1361,7 @@ async function getAssistantReply() {
     }
     addOffers(data.offers, data.offers_customer_id);
     addComparisonTable(data.comparison_table);
+    addDocumentReview(data.document_review);
     updateProgressRing(data.progress);
     if (data.plan_updates && data.plan_updates.length) {
       addBubble(

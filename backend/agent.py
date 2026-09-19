@@ -892,7 +892,8 @@ def run_agent(
     history: list[dict], lang: str | None = None, plan_context: str | None = None
 ) -> tuple[str, list[str], dict]:
     reply, suggestions, extra = _run_agent(history, lang, plan_context)
-    progress = compute_transition_progress(history)
+    progress_history = [*history, {"role": "assistant", "content": reply}]
+    progress = compute_transition_progress(progress_history)
     if progress:
         extra = {**extra, "progress": progress}
     return reply, suggestions, extra

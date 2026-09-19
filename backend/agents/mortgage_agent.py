@@ -1122,6 +1122,14 @@ def run_loan_promise_agent(history: list[dict], lang: str | None = None) -> tupl
         (m.get("content", "") for m in reversed(history) if m.get("role") == "user"), ""
     )
     extra = {"form": _build_document_form(last_extraction)} if last_extraction else {}
+    if last_extraction:
+        extra["document_review"] = {
+            "income_statement": last_extraction.get("income_statement"),
+            "expenses": last_extraction.get("expenses"),
+            "unclassified_documents": last_extraction.get("unclassified_documents", []),
+            "needs_review": bool(last_extraction.get("needs_review")),
+            "review_reason": last_extraction.get("review_reason"),
+        }
     return reply, generate_suggestions(last_user_message, reply), extra
 
 
