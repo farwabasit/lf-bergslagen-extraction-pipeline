@@ -120,8 +120,21 @@ def get_offers_for_customer(customer_id: str, current_topic: str, top_n: int = 3
 
     context_topics = db.get_customer_topics(customer_id) | {current_topic}
 
+    # A customer who just applied for (or is applying for) a mortgage/Loan
+    # Promise doesn't need another home loan pitched at them right after -
+    # that reads as "you just gave me a loan, and now you're offering me a
+    # loan?". Complementary products (loan protection insurance, etc.) still
+    # make sense here; only the competing Mortgage-category offers are
+    # excluded, and only when the CURRENT turn's topic is the mortgage
+    # application itself (not just somewhere in older history).
+    exclude_categories = {"Mortgage"} if current_topic in (
+        "mortgage_loan_promise", "mortgage_loan_offer",
+    ) else set()
+
     eligible: list[tuple[dict, str]] = []
     for offer in OFFERS:
+        if offer["category"] in exclude_categories:
+            continue
         segments = set(offer["segments"])
         matched = segments & context_topics
         if matched:
@@ -130,7 +143,10 @@ def get_offers_for_customer(customer_id: str, current_topic: str, top_n: int = 3
             eligible.append((offer, "general"))
 
     if not eligible:
-        eligible = [(o, "general") for o in OFFERS if "general" in o["segments"]]
+        eligible = [
+            (o, "general") for o in OFFERS
+            if "general" in o["segments"] and o["category"] not in exclude_categories
+        ]
 
     scored = sorted(
         ((offer, segment, db.sample_offer_score(segment, offer["code"])) for offer, segment in eligible),

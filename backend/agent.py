@@ -8,6 +8,9 @@ from .agents.fraud_dispute_agent import (
     wants_fraud_or_dispute,
 )
 from .agents.mortgage_agent import (
+    AUTH_CHOICE_FORM,
+    AUTH_CHOICE_SUGGESTIONS,
+    BANKID_DEMO_PERSONNUMMER,
     compute_transition_progress,
     loan_offer_flow_resolved,
     loan_promise_flow_resolved,
@@ -16,11 +19,12 @@ from .agents.mortgage_agent import (
     wants_loan_offer_application,
     wants_loan_promise_application,
 )
+from .agents.mortgage_agent import _bankid_chosen as bankid_chosen
 from .knowledge import LF_PAGES, SERVICE_PROVIDERS
 from .link_safety import URL_RE, strip_unverified_links as _strip_unverified_links
 from .llm_client import client
 from .suggestions import generate_suggestions
-from .text_utils import strip_attachments
+from .text_utils import has_attachment, strip_attachments
 from .tools import (
     compare_home_insurance,
     fetch_car_insurance_comparison,
@@ -31,6 +35,7 @@ from .tools import (
     get_case_status,
     get_customer_portfolio,
     request_callback,
+    verify_customer_by_personnummer,
     verify_customer_identity,
 )
 
@@ -821,6 +826,68 @@ def contact_menu_response(lang: str | None) -> tuple[str, list[str], dict]:
     return CONTACT_MENU_TEXT[key], suggestions, {"human_chat_option": CONTACT_MENU_CHAT_LABEL[key]}
 
 
+# Someone who's already bought (closed on) a home has, by definition,
+# already sorted out the financing/insurance-for-closing steps ("This
+# week's priorities" in the HOME PURCHASE CHECKLIST three-group structure -
+# a Swedish mortgage lender requires proof of home insurance before closing,
+# and the Loan Offer has to be finalized as part of it) - so the checklist
+# for this stage should skip straight to "Before you move in"/"Later". This
+# also touches the customer's real situation, so it's gated behind the same
+# BankID check the mortgage flows use, rather than just taking the
+# customer's word for what stage they're at.
+ALREADY_BOUGHT_KEYWORDS = [
+    "i bought", "i've bought", "i have bought", "just bought", "already bought",
+    "bought the apartment", "bought the house", "bought my apartment", "bought my house",
+    "jag har köpt", "jag köpte", "redan köpt", "precis köpt",
+]
+POST_PURCHASE_AUTH_TEXT = {
+    "en": (
+        "Congrats on the purchase! Since this touches your actual situation, I first need "
+        "to verify your identity via BankID before giving you tailored next steps."
+    ),
+    "sv": (
+        "Grattis till köpet! Eftersom det här rör din faktiska situation behöver jag först "
+        "verifiera din identitet via BankID innan jag ger dig skräddarsydda nästa steg."
+    ),
+}
+
+
+def wants_post_purchase_checklist(history: list[dict]) -> bool:
+    # Only the last couple of turns, not the whole conversation - this is a
+    # short two-step interaction (mention the purchase -> authenticate ->
+    # get the trimmed checklist), not a sticky flag for the rest of the
+    # chat the way the mortgage application flows are. It naturally stops
+    # firing once the exchange scrolls out of this window, so it doesn't
+    # need a separate "resolved" marker to detect (and risk colliding with
+    # the ordinary checklist's own "Before you move in"/"Later" headings,
+    # which this flow deliberately reuses).
+    recent_user_text = " ".join(
+        m.get("content", "") for m in history[-4:] if m.get("role") == "user"
+    ).lower()
+    return any(kw in recent_user_text for kw in ALREADY_BOUGHT_KEYWORDS)
+
+
+# Universal rule: a customer can never have an attached document read,
+# summarised, or filled into a form until they've verified their identity
+# via BankID - regardless of which conversation path they're on. The
+# mortgage/Loan Promise, Loan Offer, and post-purchase-checklist flows above
+# already each gate documents behind their own identity check before this
+# point is ever reached; this is the fallback for every other path (a bare
+# document upload, a general question with a payslip attached, an
+# unprompted "fill this form for me") that would otherwise fall through to
+# the general system prompt, which is instructed to read attachments freely.
+ATTACHMENT_AUTH_REQUIRED_TEXT = {
+    "en": (
+        "Before I can look at an attached document, I first need to verify your identity "
+        "via BankID."
+    ),
+    "sv": (
+        "Innan jag kan titta på ett bifogat dokument behöver jag först verifiera din "
+        "identitet via BankID."
+    ),
+}
+
+
 # Same nudge pattern again: asking about a product portfolio requires
 # identity verification first (see PORTFOLIO IDENTITY FLOW in the system
 # prompt) - remind the model every turn until a result shows the flow
@@ -917,7 +984,40 @@ def _run_agent(
     if fraud_or_dispute and not fraud_dispute_flow_resolved(history):
         return run_fraud_dispute_agent(history, lang, fraud_or_dispute)
 
+    # Fallback gate for every path above that didn't already claim the turn
+    # (and so didn't already run its own identity check before touching a
+    # document) - see ATTACHMENT_AUTH_REQUIRED_TEXT's comment above.
+    if has_attachment(history) and not bankid_chosen(history):
+        key = "sv" if lang == "sv" else "en"
+        return ATTACHMENT_AUTH_REQUIRED_TEXT[key], AUTH_CHOICE_SUGGESTIONS[key], {"form": AUTH_CHOICE_FORM}
+
+    post_purchase = wants_post_purchase_checklist(history)
+    if post_purchase and not bankid_chosen(history):
+        key = "sv" if lang == "sv" else "en"
+        return POST_PURCHASE_AUTH_TEXT[key], AUTH_CHOICE_SUGGESTIONS[key], {"form": AUTH_CHOICE_FORM}
+
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    if post_purchase and bankid_chosen(history):
+        verified = verify_customer_by_personnummer(BANKID_DEMO_PERSONNUMMER)
+        messages.append({
+            "role": "system",
+            "content": (
+                "The customer's identity is ALREADY fully verified via BankID"
+                + (f" (name: {verified['name']})" if verified else "")
+                + " - this already happened, it is not something you need to do or ask about. "
+                "Do NOT ask for their name, personnummer, or date of birth, do NOT mention "
+                "needing to verify or authenticate them further, and do NOT say anything about "
+                "BankID at all in your reply - just answer their question directly. They have "
+                "already bought/closed on their property. Mortgage financing (the Loan Offer) "
+                "and home insurance are presumed already sorted as part of closing a Swedish "
+                "home purchase, so do NOT show a 'This week's priorities' section or mention "
+                "mortgage/Loan Offer/home insurance/condominium add-on as still pending. "
+                "Using the HOME PURCHASE CHECKLIST's phase grouping, show ONLY the "
+                "'**Before you move in:**' and '**Later:**' headed lists (electricity, "
+                "broadband, housing-cooperative fee; then life insurance, loan protection, "
+                "emergency savings), in that order, in the same format as the full checklist."
+            ),
+        })
     if plan_context:
         messages.append(
             {

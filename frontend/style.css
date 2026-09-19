@@ -280,11 +280,50 @@ body.sidebar-collapsed #sidebar-show-btn {
   padding-top: 14px;
 }
 
+.plan-panel-header {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 .plan-heading {
   color: var(--lf-blue-dark);
   font-size: 14px;
   font-weight: 700;
   margin: 0 0 4px;
+}
+
+.plan-panel-header .plan-heading {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plan-panel-toggle-btn {
+  align-items: center;
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: inline-flex;
+  flex-shrink: 0;
+  font-size: 13px;
+  height: 20px;
+  justify-content: center;
+  line-height: 1;
+  width: 20px;
+}
+
+.plan-panel-toggle-btn:hover {
+  background: #eef3f8;
+  color: var(--lf-blue-dark);
+}
+
+.plan-panel-body {
+  padding-top: 4px;
 }
 
 .plan-progress,
@@ -464,20 +503,28 @@ body.sidebar-collapsed #sidebar-show-btn {
   flex: 1;
   display: flex;
   flex-direction: column;
-  max-width: 1500px;
   width: 100%;
-  margin: 0 auto;
   padding: 16px 32px;
   min-height: 0;
   overflow: hidden;
-  transition: max-width 0.2s ease;
 }
 
-/* Hiding the previous-chats sidebar (see .sidebar-toggle-btn above) frees
-   up real width, not just blank space - let the chat column fill all of
-   it rather than leaving the freed area empty. */
-body.sidebar-collapsed .chat-shell {
-  max-width: none;
+/* .chat-shell itself is intentionally unconstrained (fills .app-shell's
+   full remaining width) so .messages' own edge-to-edge bleed below reaches
+   the panel's true right edge instead of stopping ~750px short of it on a
+   wide screen - .chat-shell used to cap out at 1500px and center itself,
+   which put empty space (and the scrollbar) well inboard of the real edge.
+   Everything else in the column still reads best at a bounded width, so
+   they get their own centered max-width here instead. */
+.progress-ring-bar,
+.chips,
+.attachment-preview,
+.rating-bar,
+.composer {
+  max-width: 1500px;
+  margin-left: auto;
+  margin-right: auto;
+  width: 100%;
 }
 
 .chat-shell.drag-over {

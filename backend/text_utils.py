@@ -22,3 +22,18 @@ def strip_attachments(text: str) -> str:
     wants_human_contact just because it happens to contain a phrase like
     "a representative" or "customer service"."""
     return _ATTACHMENT_BLOCK_RE.sub("", text or "").strip()
+
+
+_ATTACHMENT_MARKER_RE = re.compile(r"\[Attached (?:document|file):")
+
+
+def has_attachment(history: list[dict]) -> bool:
+    """True if any user message anywhere in the conversation carries an
+    attached document - used to gate document-aware behaviour (reading,
+    summarising, filling a form from it) behind identity verification, so a
+    document's contents can never be inspected before the customer has
+    proven who they are."""
+    return any(
+        m.get("role") == "user" and _ATTACHMENT_MARKER_RE.search(m.get("content") or "")
+        for m in history
+    )

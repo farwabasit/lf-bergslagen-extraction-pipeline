@@ -217,15 +217,56 @@ const PLAN_PHASE_LABELS = {
   later: "Later",
 };
 
+// Persisted per-browser so the panel stays collapsed/expanded across the
+// repeated re-renders every chat reply triggers (loadPlan runs after each
+// turn) and across page reloads - a per-viewer convenience, not shared
+// state, so plain localStorage is the right fit here.
+let planPanelCollapsed = localStorage.getItem("ltn-plan-collapsed") === "1";
+
 function clearPlanPanel() {
   planPanelEl.innerHTML = "";
 }
 
-function renderEmptyPlan() {
-  clearPlanPanel();
+// Shared by renderEmptyPlan/renderPlan below: a header row with the title
+// plus a collapse/expand toggle, and a body wrapper whose visibility
+// reflects planPanelCollapsed. Returns the body element for the caller to
+// append its own content into.
+function buildPlanPanelShell(titleText) {
+  const header = document.createElement("div");
+  header.className = "plan-panel-header";
+
   const heading = document.createElement("h2");
   heading.className = "plan-heading";
-  heading.textContent = "My transition plan";
+  heading.textContent = titleText;
+
+  const toggleBtn = document.createElement("button");
+  toggleBtn.type = "button";
+  toggleBtn.className = "plan-panel-toggle-btn";
+  toggleBtn.setAttribute("aria-expanded", String(!planPanelCollapsed));
+  toggleBtn.title = planPanelCollapsed ? "Expand" : "Minimize";
+  toggleBtn.textContent = planPanelCollapsed ? "+" : "−";
+
+  const body = document.createElement("div");
+  body.className = "plan-panel-body";
+  body.hidden = planPanelCollapsed;
+
+  toggleBtn.addEventListener("click", () => {
+    planPanelCollapsed = !planPanelCollapsed;
+    localStorage.setItem("ltn-plan-collapsed", planPanelCollapsed ? "1" : "0");
+    body.hidden = planPanelCollapsed;
+    toggleBtn.textContent = planPanelCollapsed ? "+" : "−";
+    toggleBtn.title = planPanelCollapsed ? "Expand" : "Minimize";
+    toggleBtn.setAttribute("aria-expanded", String(!planPanelCollapsed));
+  });
+
+  header.append(heading, toggleBtn);
+  planPanelEl.append(header, body);
+  return body;
+}
+
+function renderEmptyPlan() {
+  clearPlanPanel();
+  const body = buildPlanPanelShell("My transition plan");
   const copy = document.createElement("p");
   copy.className = "plan-empty-copy";
   copy.textContent = "Buying a home? Create a checklist you can update as you go.";
@@ -234,24 +275,22 @@ function renderEmptyPlan() {
   button.type = "button";
   button.textContent = "Create home-purchase plan";
   button.addEventListener("click", createHomePurchasePlan);
-  planPanelEl.append(heading, copy, button);
+  body.append(copy, button);
 }
 
 function renderPlan(plan) {
   clearPlanPanel();
-  const heading = document.createElement("h2");
-  heading.className = "plan-heading";
-  heading.textContent = plan.event_title;
+  const body = buildPlanPanelShell(plan.event_title);
   const completed = plan.tasks.filter((task) => task.status === "done").length;
   const progress = document.createElement("p");
   progress.className = "plan-progress";
   progress.textContent = `${completed} / ${plan.tasks.length} complete`;
-  planPanelEl.append(heading, progress);
+  body.append(progress);
   if (plan.key_date) {
     const date = document.createElement("p");
     date.className = "plan-date";
     date.textContent = `Key date: ${plan.key_date}`;
-    planPanelEl.appendChild(date);
+    body.appendChild(date);
   }
 
   for (const phase of ["this_week", "before_move_in", "later"]) {
@@ -260,7 +299,7 @@ function renderPlan(plan) {
     const phaseHeading = document.createElement("h3");
     phaseHeading.className = "plan-phase";
     phaseHeading.textContent = PLAN_PHASE_LABELS[phase];
-    planPanelEl.appendChild(phaseHeading);
+    body.appendChild(phaseHeading);
     tasks.forEach((task) => {
       const row = document.createElement("div");
       row.className = `plan-task${task.status === "done" ? " done" : ""}`;
@@ -281,7 +320,7 @@ function renderPlan(plan) {
       meta.textContent = task.due_date ? `Due ${task.due_date}` : task.priority + " priority";
       label.append(title, meta);
       row.append(checkbox, label);
-      planPanelEl.appendChild(row);
+      body.appendChild(row);
     });
   }
 }

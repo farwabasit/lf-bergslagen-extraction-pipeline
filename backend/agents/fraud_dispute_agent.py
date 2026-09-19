@@ -196,7 +196,8 @@ TEXT = {
             "Thanks, {name} - I've opened a {case_type} case for transaction {txn_id} "
             "({date}, {merchant}, {amount}).\n\n"
             "Case ID: {case_id}\n"
-            "A Customer Service representative will review it and follow up with you."
+            "A Customer Service representative will review it and follow up with you.\n\n"
+            "Is there anything else I can help you with today?"
         ),
     },
     "sv": {
@@ -230,7 +231,8 @@ TEXT = {
             "Tack, {name} - jag har öppnat ett {case_type_sv}-ärende för transaktionen "
             "{txn_id} ({date}, {merchant}, {amount}).\n\n"
             "Ärende-ID: {case_id}\n"
-            "En kundtjänstmedarbetare granskar det och återkommer till dig."
+            "En kundtjänstmedarbetare granskar det och återkommer till dig.\n\n"
+            "Kan jag hjälpa dig med något annat idag?"
         ),
     },
 }
