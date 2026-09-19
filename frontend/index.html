@@ -11,10 +11,9 @@
     <div class="topbar-left">
       <button id="sidebar-show-btn" class="sidebar-toggle-btn topbar-sidebar-toggle" type="button" title="Show previous chats" hidden>☰</button>
       <div class="brand" id="home-btn" role="button" tabindex="0" title="Start a new chat">
-        <span class="avatar avatar-ai">S</span>
+        <span class="avatar avatar-ai"><img src="assets/brand/lf-mark.svg" alt="LF Bergslagen" /></span>
         <div class="brand-text">
-          <span class="brand-name">Sara</span>
-          <span class="brand-sub">Digital assistant · LF Bergslagen</span>
+          <span class="brand-sub">LF Bergslagen</span>
         </div>
       </div>
     </div>
@@ -23,7 +22,15 @@
         <button class="lang-btn" data-lang="en" type="button">EN</button>
         <button class="lang-btn" data-lang="sv" type="button">SV</button>
       </div>
-      <button id="human-btn" class="human-btn" type="button">Talk to a person</button>
+      <button id="human-btn" class="human-btn" type="button">
+        <svg class="human-btn-icon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M4,13 V11 a8,8 0 0 1 16,0 v2"></path>
+          <rect x="2" y="13" width="4" height="6" rx="1.5"></rect>
+          <rect x="18" y="13" width="4" height="6" rx="1.5"></rect>
+          <path d="M20,19 v1 a3,3 0 0 1 -3,3 h-3"></path>
+        </svg>
+        <span id="human-btn-label">Contact us</span>
+      </button>
     </div>
   </header>
 
@@ -33,14 +40,31 @@
         <button id="new-chat-btn" class="new-chat-btn" type="button">+ New chat</button>
         <button id="sidebar-hide-btn" class="sidebar-toggle-btn" type="button" title="Hide previous chats">‹</button>
       </div>
+      <div class="chat-search">
+        <input id="chat-search-input" type="text" placeholder="Search previous chats..." autocomplete="off" />
+      </div>
       <div id="chat-list" class="chat-list"></div>
     </aside>
 
     <main class="chat-shell">
+      <div id="progress-ring-bar" class="progress-ring-bar" hidden>
+        <div class="progress-ring">
+          <svg viewBox="0 0 64 64" class="progress-ring-svg">
+            <circle class="progress-ring-track" cx="32" cy="32" r="28"></circle>
+            <circle id="progress-ring-fill" class="progress-ring-fill" cx="32" cy="32" r="28"></circle>
+          </svg>
+          <span id="progress-ring-percent" class="progress-ring-percent">0%</span>
+        </div>
+        <div class="progress-ring-info">
+          <span id="progress-ring-title" class="progress-ring-title"></span>
+          <div id="progress-steps" class="progress-steps"></div>
+        </div>
+      </div>
+
       <div id="messages" class="messages">
         <div class="msg assistant">
-          <span class="msg-label" id="greeting-label">Sara · AI assistant</span>
-          <p id="greeting-text">Hej! I'm Sara, LF Bergslagen's digital assistant. Tell me what's changing in your life, and I'll help you think it through.</p>
+          <span class="msg-label" id="greeting-label">Sara · Digital Companion</span>
+          <p id="greeting-text">Hej! I'm Sara, LF Bergslagen's digital companion. Tell me what's changing in your life, and I'll help you think it through.</p>
         </div>
       </div>
 

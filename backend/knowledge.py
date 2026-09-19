@@ -114,6 +114,80 @@ MOCK_CUSTOMERS = [
     },
 ]
 
+# Home insurance tier comparison (Bas/Mellan/Stor) for the comparison-table
+# UI - illustrative demo tiers/pricing, not scraped from a live LF Bergslagen
+# page (unlike car_insurance above, LF Bergslagen's real hemförsäkring page
+# doesn't expose a tiered breakdown like this - confirmed by inspecting the
+# live page). Same "prototype data" status as MOCK_CUSTOMERS/SERVICE_PROVIDERS
+# above; a real deployment would source this from LF Bergslagen's actual
+# product/pricing catalog. See compare_home_insurance in tools.py.
+HOME_INSURANCE_TIERS = {
+    "columns": ["Bas (Base Package)", "Mellan (Medium)", "Stor (Large)"],
+    "rows": [
+        {
+            "feature": "Best Suited For",
+            "values": [
+                "Minimalists, renters, budget-conscious users.",
+                "First-time apartment buyers (bostadsrätt).",
+                "Frequent travelers & high-value property owners.",
+            ],
+        },
+        {
+            "feature": "Property & Belongings Protection",
+            "values": [
+                "Covers theft, fire, and water damage up to standard policy limits.",
+                "Covers theft, fire, and water damage up to standard policy limits.",
+                "Covers theft, fire, and water damage up to standard policy limits.",
+            ],
+        },
+        {
+            "feature": "Personal & Legal Protection",
+            "values": [
+                "Includes Liability, Legal, Assault, & ID-Theft protection.",
+                "Includes Liability, Legal, Assault, & ID-Theft protection.",
+                "Includes Liability, Legal, Assault, & ID-Theft protection.",
+            ],
+        },
+        {
+            "feature": "Travel Insurance (Reseskydd)",
+            "values": [
+                "Standard 45-day cover for emergency illness/accidents abroad.",
+                "Standard 45-day cover for emergency illness/accidents abroad.",
+                "Extended 45-day cover: adds cancellation protection & trip delay cover.",
+            ],
+        },
+        {
+            "feature": "\"Accident / Oops\" Coverage (Allrisk)",
+            "values": [
+                "Not included.",
+                "Included: covers accidental personal damage up to 100,000 SEK (e.g. dropping a phone, spilling coffee on a laptop).",
+                "Included: covers accidental personal damage up to 100,000 SEK.",
+            ],
+        },
+        {
+            "feature": "Condominium Add-on (Bostadsrättstillägg)",
+            "values": [
+                "Optional add-on (+approx. 30-50 SEK/mo).",
+                "Optional add-on - essential if buying a condo, to cover fixed fittings/floors.",
+                "Optional add-on - can be bundled or added natively.",
+            ],
+        },
+        {
+            "feature": "Deductible (Självrisk)",
+            "values": [
+                "Standard (~1,500 SEK).",
+                "Customizable / reduced options.",
+                "Flexible / lowest tier options.",
+            ],
+        },
+        {
+            "feature": "Estimated Monthly Price",
+            "values": ["75-120 SEK/mo", "140-190 SEK/mo", "210-280 SEK/mo"],
+            "co_living_values": ["120-190 SEK/mo", "220-300 SEK/mo", "330-440 SEK/mo"],
+        },
+    ],
+}
+
 # --- Mortgage agent mock market/policy data -------------------------------
 # All illustrative demo values, not real LF Bergslagen rates or policy.
 # Real deployment would source these from the bank's actual pricing engine

@@ -252,8 +252,41 @@ def _extract_attached_documents(history: list[dict]) -> list[dict]:
     return documents
 
 
+IDENTITY_HINT_RE = re.compile(r"\d{6,8}[-\s]?\d{4}")
+
+
+def _has_identity_hint(history: list[dict]) -> bool:
+    return bool(IDENTITY_HINT_RE.search(
+        " ".join(m.get("content", "") for m in history if m.get("role") == "user")
+    ))
+
+
+def compute_transition_progress(history: list[dict]) -> dict | None:
+    """Progress through whichever mortgage flow (Loan Promise or Loan Offer)
+    the customer has started, derived from the same conversation-transcript
+    signals the flows themselves already use (identity hint, attached
+    document count, resolved markers) - no separate session state needed.
+    Powers the Task Completion Ring in the chat widget. None until a flow
+    has actually been started."""
+    if wants_loan_offer_application(history):
+        flow_label, documents_needed, resolved = "Loan Offer", 3, loan_offer_flow_resolved(history)
+    elif wants_loan_promise_application(history):
+        flow_label, documents_needed, resolved = "Loan Promise", 2, loan_promise_flow_resolved(history)
+    else:
+        return None
+
+    steps = [
+        {"label": "Application started", "done": True},
+        {"label": "Identity verified", "done": _has_identity_hint(history)},
+        {"label": "Documents uploaded", "done": len(_extract_attached_documents(history)) >= documents_needed},
+        {"label": "Decision reached", "done": resolved},
+    ]
+    completed = sum(1 for step in steps if step["done"])
+    return {"flow": flow_label, "steps": steps, "percent": round(completed / len(steps) * 100)}
+
+
 LOAN_PROMISE_SYSTEM_PROMPT = """You are the Mortgage Agent, a specialist that
-Sara (LF Bergslagen's main digital assistant) hands a conversation off to once
+Sara (LF Bergslagen's main digital companion) hands a conversation off to once
 a customer wants to apply for a Loan Promise (Lånelöfte) - an income-based
 statement of how much they could likely borrow, used BEFORE they've found a
 specific property, so they're ready to bid once they find one. Introduce
@@ -348,7 +381,7 @@ RULES THROUGHOUT:
 """
 
 LOAN_OFFER_SYSTEM_PROMPT = """You are the Mortgage Agent, a specialist that
-Sara (LF Bergslagen's main digital assistant) hands a conversation off to once
+Sara (LF Bergslagen's main digital companion) hands a conversation off to once
 a customer wants to apply for a Loan Offer - a firm mortgage offer tied to a
 specific property they've already agreed to buy (won the bidding / signed a
 purchase agreement). The customer has ALREADY seen an introduction covering

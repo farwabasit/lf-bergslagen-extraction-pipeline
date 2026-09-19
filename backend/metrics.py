@@ -59,7 +59,17 @@ def record_handoff(session_id: str | None, topic: str) -> None:
 
 
 def record_rating(session_id: str | None, rating: int) -> None:
-    _write({"type": "rating", "session_id": session_id, "rating": rating})
+    """Also tags the rating with whatever topic that session was last about
+    (from its own interaction events) - a bare 1-5 number isn't actionable
+    on its own; knowing WHICH kind of conversation earned a 3 or a 4 is what
+    turns it into real customer insight (see build_summary's
+    customer_insights, which groups by this field)."""
+    topic = None
+    if session_id:
+        session_interactions = [e for e in read_events("interaction") if e.get("session_id") == session_id]
+        if session_interactions:
+            topic = session_interactions[-1].get("topic")
+    _write({"type": "rating", "session_id": session_id, "rating": rating, "topic": topic})
 
 
 def record_llm_usage(
@@ -191,6 +201,31 @@ def build_summary(days: int = 14) -> dict:
     rating_distribution = {str(n): rating_values.count(n) for n in range(1, 6)}
     avg_rating = round(sum(rating_values) / len(rating_values), 2) if rating_values else None
 
+    # --- Customer insight: satisfaction broken down by topic, worst first -
+    # this is the actionable view (which kinds of conversations are leaving
+    # customers only "OK" or worse), not just one global average. A topic
+    # needs at least 2 ratings before it's flagged, so a single fluke score
+    # doesn't brand a whole topic as a problem.
+    topic_ratings: dict[str, list[int]] = {}
+    for e in ratings:
+        rating_value = e.get("rating")
+        if not isinstance(rating_value, int):
+            continue
+        topic_ratings.setdefault(e.get("topic") or "general_advisory", []).append(rating_value)
+    customer_insights = sorted(
+        (
+            {
+                "topic": topic,
+                "label": TOPIC_LABELS.get(topic, topic.replace("_", " ").title()),
+                "count": len(values),
+                "average": round(sum(values) / len(values), 2),
+                "needs_attention": len(values) >= 2 and (sum(values) / len(values)) < 3.5,
+            }
+            for topic, values in topic_ratings.items()
+        ),
+        key=lambda item: item["average"],
+    )
+
     # --- Token consumption rollups -----------------------------------------
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     tokens = {
@@ -234,6 +269,7 @@ def build_summary(days: int = 14) -> dict:
             "average": avg_rating,
             "distribution": rating_distribution,
         },
+        "customer_insights": customer_insights,
         "tokens": tokens,
         "technical": {
             "total_llm_calls": len(llm_calls),

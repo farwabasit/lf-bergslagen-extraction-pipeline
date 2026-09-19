@@ -191,6 +191,12 @@ body {
   margin: 0 0 14px;
 }
 
+.panel-sub {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: -8px 0 14px;
+}
+
 /* --- Bar charts, hand-rolled (no charting library dependency) --- */
 
 .bar-chart-vertical {
@@ -370,4 +376,8 @@ body {
 
 .badge.invalid {
   background: var(--lf-red);
+}
+
+.badge.warn {
+  background: #b8860b;
 }

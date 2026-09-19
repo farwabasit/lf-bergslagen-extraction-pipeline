@@ -8,18 +8,31 @@
   <link rel="stylesheet" href="site.css" />
 </head>
 <body class="site-body">
+  <div class="site-utility-bar">
+    <div class="site-utility-tabs">
+      <a href="#" class="site-utility-tab active">Private</a>
+      <a href="#" class="site-utility-tab">Business &amp; Agriculture</a>
+    </div>
+  </div>
+
   <header class="site-nav">
     <div class="site-logo">
-      <span class="site-logo-mark">LF</span>
-      <span class="site-logo-text">Bergslagen</span>
+      <img class="site-logo-mark" src="assets/brand/lf-bergslagen-logo.svg" alt="LF Bergslagen" />
     </div>
-    <nav class="site-links">
-      <a href="#loans">Loans &amp; Mortgages</a>
-      <a href="#insurance">Insurance</a>
-      <a href="#pension">Pension &amp; Savings</a>
-      <a href="#become-customer">Become a customer</a>
+    <nav class="site-icon-links">
+      <button type="button" class="site-icon-link" id="nav-county-btn">
+        <img class="site-icon-link-glyph-svg" src="assets/icons/icon-nav-county.svg" alt="" /><span>County</span>
+      </button>
+      <button type="button" class="site-icon-link" id="nav-search-btn">
+        <img class="site-icon-link-glyph-svg" src="assets/icons/icon-search.svg" alt="" /><span>Search</span>
+      </button>
+      <button type="button" class="site-icon-link" id="nav-login-btn">
+        <img class="site-icon-link-glyph-svg" src="assets/icons/icon-login.svg" alt="" /><span>Log in</span>
+      </button>
+      <a href="#products" class="site-icon-link">
+        <span class="site-icon-link-glyph">☰</span><span>Menu</span>
+      </a>
     </nav>
-    <button id="nav-chat-btn" class="site-nav-cta" type="button">💬 Chat with Sara</button>
   </header>
 
   <main>
@@ -28,22 +41,53 @@
         <h1>Life brings changes.<br />We help you navigate them.</h1>
         <p>
           From buying your first home to planning retirement, LF Bergslagen's
-          digital assistant Sara is ready around the clock with answers,
+          digital companion Sara is ready around the clock with answers,
           guidance, and a direct line to a real advisor when you need one.
         </p>
         <div class="hero-actions">
-          <button id="hero-chat-btn" class="btn btn-primary" type="button">💬 Chat with Sara</button>
+          <button id="hero-chat-btn" class="btn btn-primary" type="button">
+            <img class="btn-icon" src="assets/icons/icon-chat.svg" alt="" /> Chat with Sara
+          </button>
           <a href="#life-moments" class="btn btn-secondary">See what we help with</a>
         </div>
       </div>
       <div class="hero-art" aria-hidden="true">
-        <div class="hero-card">
-          <span class="hero-card-avatar">S</span>
-          <div>
-            <strong>Sara · AI assistant</strong>
-            <p>"Tell me what's changing in your life, and I'll help you think it through."</p>
-          </div>
-        </div>
+        <img class="hero-illustration" src="assets/illustrations/illus-communication.svg" alt="" />
+      </div>
+    </section>
+
+    <div class="brand-strip" aria-hidden="true">
+      <img src="assets/brand/brand-strip.svg" alt="" />
+    </div>
+
+    <section id="products" class="product-grid-section">
+      <h2>Insurance, bank and pension - all in one place</h2>
+      <p class="section-sub">Tap any product below to ask Sara about it.</p>
+      <div class="product-icon-grid">
+        <button class="product-icon-card" data-text="Tell me about home insurance">
+          <img class="product-icon-glyph" src="assets/icons/icon-home.svg" alt="" /><span>Home insurance</span>
+        </button>
+        <button class="product-icon-card" data-text="Can you compare car insurance levels, which one should I choose?">
+          <img class="product-icon-glyph" src="assets/icons/icon-car.svg" alt="" /><span>Car insurance</span>
+        </button>
+        <button class="product-icon-card" data-text="Tell me about accident and health insurance">
+          <img class="product-icon-glyph" src="assets/icons/icon-accident-health.svg" alt="" /><span>Accident &amp; health</span>
+        </button>
+        <button class="product-icon-card" data-text="Tell me about child insurance">
+          <img class="product-icon-glyph" src="assets/icons/icon-child.svg" alt="" /><span>Child insurance</span>
+        </button>
+        <button class="product-icon-card" data-text="I want to apply for a mortgage">
+          <img class="product-icon-glyph" src="assets/icons/icon-mortgage.svg" alt="" /><span>Mortgage</span>
+        </button>
+        <button class="product-icon-card" data-text="I'd like to become a customer">
+          <img class="product-icon-glyph" src="assets/icons/icon-wallet.svg" alt="" /><span>Become a customer</span>
+        </button>
+        <button class="product-icon-card" data-text="Tell me about pension and retirement savings">
+          <img class="product-icon-glyph" src="assets/icons/icon-pension.svg" alt="" /><span>Pension</span>
+        </button>
+        <button class="product-icon-card" data-text="I want to report a claim">
+          <img class="product-icon-glyph" src="assets/icons/icon-claim.svg" alt="" /><span>Report a claim</span>
+        </button>
       </div>
     </section>
 
@@ -51,45 +95,75 @@
       <h2>What's changing in your life?</h2>
       <p class="section-sub">Tap one below to start a chat with Sara about it.</p>
       <div class="moment-grid">
-        <button class="moment-card" data-text="I'd like help with buying a house">🏠<span>Buying a house</span></button>
-        <button class="moment-card" data-text="My partner and I are moving in together">🏡<span>Moving in together</span></button>
-        <button class="moment-card" data-text="We're having a baby soon">👶<span>Having a child</span></button>
-        <button class="moment-card" data-text="I'm going through a divorce">📄<span>Divorce</span></button>
-        <button class="moment-card" data-text="I'm starting my own business">💼<span>Starting a business</span></button>
-        <button class="moment-card" data-text="I'm retiring soon">🌅<span>Retirement</span></button>
-        <button class="moment-card" data-text="I'd like help with buying a holiday home">🏖️<span>Holiday home</span></button>
-        <button class="moment-card" data-text="I'd like help with buying a car">🚗<span>Buying a car</span></button>
+        <button class="moment-card" data-text="I'd like help with buying a house"><img src="assets/icons/icon-home.svg" alt="" /><span>Buying a house</span></button>
+        <button class="moment-card" data-text="My partner and I are moving in together"><img src="assets/icons/icon-heart.svg" alt="" /><span>Moving in together</span></button>
+        <button class="moment-card" data-text="We're having a baby soon"><img src="assets/icons/icon-child.svg" alt="" /><span>Having a child</span></button>
+        <button class="moment-card" data-text="I'm going through a divorce"><img src="assets/icons/icon-document.svg" alt="" /><span>Divorce</span></button>
+        <button class="moment-card" data-text="I'm starting my own business"><img src="assets/icons/icon-briefcase.svg" alt="" /><span>Starting a business</span></button>
+        <button class="moment-card" data-text="I'm retiring soon"><img src="assets/icons/icon-sunset.svg" alt="" /><span>Retirement</span></button>
+        <button class="moment-card" data-text="I'd like help with buying a holiday home"><img src="assets/icons/icon-cottage.svg" alt="" /><span>Holiday home</span></button>
+        <button class="moment-card" data-text="I'd like help with buying a car"><img src="assets/icons/icon-car.svg" alt="" /><span>Buying a car</span></button>
       </div>
     </section>
 
-    <section id="loans" class="products">
-      <div class="product-col">
-        <h3>Loans &amp; Mortgages</h3>
-        <ul>
-          <li>Home loans &amp; mortgages</li>
-          <li>Holiday home financing</li>
-          <li>Car loans</li>
-          <li>Loan &amp; interest calculators</li>
-        </ul>
+    <section class="offers-section">
+      <h2>We're here for you</h2>
+      <div class="offer-grid">
+        <button class="offer-card" data-text="I'd like help with buying a holiday home">
+          <img class="offer-card-art" src="assets/illustrations/illus-holiday-home.svg" alt="" />
+          <span class="offer-tag">Explore</span>
+          <h3>Dreaming of a holiday home?</h3>
+          <p>Ask Sara what buying a fritidshus involves, from financing to insuring it.</p>
+        </button>
+        <button class="offer-card" data-text="Tell me about accident and health insurance">
+          <img class="offer-card-art" src="assets/illustrations/illus-travel-insurance.svg" alt="" />
+          <span class="offer-tag">Explore</span>
+          <h3>Heading abroad soon?</h3>
+          <p>Ask Sara about accident and health cover so you're protected while travelling.</p>
+        </button>
+        <button class="offer-card" data-text="I want to apply for a mortgage">
+          <img class="offer-card-art" src="assets/illustrations/illus-loan.svg" alt="" />
+          <span class="offer-tag">Explore</span>
+          <h3>Need extra borrowing power?</h3>
+          <p>Ask Sara about loans and mortgages, from a first home to consolidating debt.</p>
+        </button>
       </div>
-      <div class="product-col" id="insurance">
-        <h3>Insurance</h3>
-        <ul>
-          <li>Home insurance</li>
-          <li>Car insurance</li>
-          <li>Life insurance</li>
-          <li>Child &amp; family insurance</li>
-          <li>Accident &amp; health insurance</li>
-          <li>Loan protection insurance</li>
-        </ul>
+    </section>
+
+    <section class="popular-section">
+      <h2><img class="popular-heading-icon" src="assets/icons/icon-target.svg" alt="" /> Popular</h2>
+      <div class="popular-grid">
+        <button class="popular-link" data-text="I want to apply for a mortgage">
+          <span class="popular-link-label"><img class="popular-link-icon" src="assets/icons/icon-mortgage.svg" alt="" />Borrow</span><span class="popular-link-arrow">→</span>
+        </button>
+        <button class="popular-link" data-text="Tell me about savings accounts">
+          <span class="popular-link-label"><img class="popular-link-icon" src="assets/icons/icon-savings.svg" alt="" />Save monthly</span><span class="popular-link-arrow">→</span>
+        </button>
+        <button class="popular-link" data-text="I want to move my pension">
+          <span class="popular-link-label"><img class="popular-link-icon" src="assets/icons/icon-pension.svg" alt="" />Move your pension</span><span class="popular-link-arrow">→</span>
+        </button>
+        <button class="popular-link" data-text="Can you compare car insurance levels, which one should I choose?">
+          <span class="popular-link-label"><img class="popular-link-icon" src="assets/icons/icon-car.svg" alt="" />Vehicle insurance</span><span class="popular-link-arrow">→</span>
+        </button>
+        <button class="popular-link" data-text="Tell me about life insurance and personal insurance">
+          <span class="popular-link-label"><img class="popular-link-icon" src="assets/icons/icon-accident-health.svg" alt="" />Personal insurance</span><span class="popular-link-arrow">→</span>
+        </button>
+        <a class="popular-link" href="https://www.lansforsakringar.se/bergslagen/privat/tips-guider/" target="_blank" rel="noopener">
+          <span class="popular-link-label"><img class="popular-link-icon" src="assets/icons/icon-guide.svg" alt="" />Tips &amp; guides</span><span class="popular-link-arrow">→</span>
+        </a>
       </div>
-      <div class="product-col" id="pension">
-        <h3>Pension &amp; Savings</h3>
-        <ul>
-          <li>Retirement planning</li>
-          <li>Savings accounts</li>
-          <li>Fund &amp; pension advice</li>
-        </ul>
+    </section>
+
+    <section class="welcome-section">
+      <img class="welcome-art" src="assets/illustrations/illus-personal-loan.svg" alt="" />
+      <div class="welcome-copy">
+        <h2>Welcome to LF Bergslagen</h2>
+        <p>
+          LF Bergslagen is a local, member-owned company with everything under one roof —
+          insurance, bank, and pension. In this demo, Sara — our digital companion — is
+          always close at hand for fast help and personal guidance, day or night, with a
+          real advisor a message away when you need one.
+        </p>
       </div>
     </section>
 
@@ -100,39 +174,85 @@
       </div>
       <button class="btn btn-primary cta-band-btn" type="button" data-text="I'd like to become a customer">💬 Ask Sara</button>
     </section>
+
+    <section class="quick-links-section">
+      <h2>Quick links</h2>
+      <div class="quick-links-grid">
+        <a href="#" class="quick-link">The app</a>
+        <a href="#" class="quick-link">My pages</a>
+        <a href="#" class="quick-link">BankID</a>
+      </div>
+    </section>
   </main>
 
   <footer class="site-footer">
+    <div class="footer-illustration" aria-hidden="true">
+      <img src="assets/brand/brand-strip.svg" alt="" />
+    </div>
+
+    <div class="footer-top">
+      <div class="site-logo">
+        <img class="site-logo-mark" src="assets/brand/lf-bergslagen-logo.svg" alt="LF Bergslagen" />
+      </div>
+      <p class="footer-blurb">Local, member-focused financial services — now with a digital companion to help you through life's transitions.</p>
+    </div>
+
     <div class="footer-cols">
       <div>
-        <div class="site-logo">
-          <span class="site-logo-mark">LF</span>
-          <span class="site-logo-text">Bergslagen</span>
-        </div>
-        <p class="footer-blurb">Local, member-focused financial services — now with an AI assistant to help you through life's transitions.</p>
+        <strong>Insurance</strong>
+        <button class="footer-link" data-text="Tell me about home insurance">Home insurance</button>
+        <button class="footer-link" data-text="Can you compare car insurance levels, which one should I choose?">Car insurance</button>
+        <button class="footer-link" data-text="Tell me about accident and health insurance">Accident &amp; health</button>
+        <button class="footer-link" data-text="Tell me about child insurance">Child insurance</button>
       </div>
       <div>
-        <strong>Company</strong>
-        <a href="#">About us</a>
+        <strong>Loans</strong>
+        <button class="footer-link" data-text="I want to apply for a mortgage">Mortgage</button>
+        <button class="footer-link" data-text="What loan and mortgage options do you offer?">All loan services</button>
+      </div>
+      <div>
+        <strong>Save &amp; invest</strong>
+        <button class="footer-link" data-text="Tell me about savings accounts">Savings accounts</button>
+        <button class="footer-link" data-text="Tell me about pension and retirement savings">Pension</button>
+      </div>
+      <div>
+        <strong>Account &amp; cards</strong>
+        <button class="footer-link" data-text="I'd like to become a customer">Become a customer</button>
+      </div>
+      <div>
+        <strong>About us</strong>
+        <a href="#">About LF Bergslagen</a>
         <a href="#">Careers</a>
         <a href="#">Sustainability</a>
       </div>
       <div>
-        <strong>Support</strong>
+        <strong>Customer service</strong>
         <a href="#" id="footer-chat-link">Chat with Sara</a>
         <a href="#">Find an office</a>
         <a href="/dashboard.html">Advisor dashboard</a>
       </div>
+      <div>
+        <strong>Other</strong>
+        <a href="https://www.lansforsakringar.se/bergslagen/privat/tips-guider/" target="_blank" rel="noopener">Tips &amp; guides</a>
+        <button class="footer-link" data-text="I want to report a claim">Report a claim</button>
+      </div>
+      <div>
+        <strong>Feedback</strong>
+        <a href="#">Give feedback</a>
+      </div>
     </div>
+
     <p class="footer-disclaimer">
-      This is a demo prototype built for an AI-agent hackathon and is not the
-      official Länsförsäkringar Bergslagen website.
+      This is a demo prototype built for an AI-agent hackathon, styled to resemble
+      Länsförsäkringar Bergslagen's real website layout and branding for demonstration
+      purposes only — it is not the official Länsförsäkringar Bergslagen website, and no
+      content here (offers, news, pricing) is real.
     </p>
   </footer>
 
   <div id="chat-widget" class="chat-widget" hidden>
     <div class="chat-widget-header">
-      <span>Sara · AI assistant</span>
+      <span>Sara · Digital Companion</span>
       <div class="chat-widget-header-actions">
         <button id="chat-widget-maximize" type="button" title="Expand" aria-label="Expand chat">⤢</button>
         <button id="chat-widget-fullscreen" type="button" title="Full screen" aria-label="Full screen chat">⛶</button>

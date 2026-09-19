@@ -1,3 +1,5 @@
+import copy
+import json
 import re
 import unicodedata
 from pathlib import Path
@@ -7,7 +9,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from . import cs_client, verified_customer
-from .knowledge import BOOLI_URL, LF_PAGES, MOCK_CUSTOMERS, SERVICE_PROVIDERS
+from .knowledge import BOOLI_URL, HOME_INSURANCE_TIERS, LF_PAGES, MOCK_CUSTOMERS, SERVICE_PROVIDERS
 
 # Towns LF Bergslagen actually serves (same list SERVICE_PROVIDERS uses for
 # its local claim partners) - reused here so home-search guidance can tell a
@@ -164,6 +166,162 @@ def fetch_lf_page(topic: str) -> str:
 
     _write_cache(topic, result)
     return result
+
+
+# Real, live comparison table on LF's car insurance page (Helförsäkring /
+# Halvförsäkring / Trafikförsäkring, feature by feature) - separate from
+# fetch_lf_page above because that function flattens all page text, which
+# would turn this table into an unreadable jumble. Parses the actual
+# <table> markup instead, targeting the specific structure LF's page uses
+# (confirmed by inspecting the live HTML): each feature row's short name
+# lives in a <button aria-label="..."> (the cell's own text mixes it with
+# a long description), and each tier cell's text ends in "ingår" (included)
+# or "ingår inte" (not included). If LF changes this structure, parsing
+# quietly finds nothing/mismatches and this returns None - the caller falls
+# back to fetch_lf_page's plain text rather than show a broken table.
+CAR_INSURANCE_TABLE_CACHE_KEY = "car_insurance_table"
+
+
+def _parse_car_insurance_table(html: str) -> dict | None:
+    soup = BeautifulSoup(html, "html.parser")
+    table = soup.find("table")
+    if not table:
+        return None
+
+    trs = table.find_all("tr")
+    if not trs:
+        return None
+
+    header_cells = trs[0].find_all("th")[2:]  # first two are the feature-name/spacer columns
+    columns = [
+        span.get_text(strip=True)
+        for th in header_cells
+        for span in th.select("span.d-none.d-md-block")
+    ]
+    if not columns:
+        return None
+
+    rows = []
+    for tr in trs[1:]:
+        if tr.get("aria-hidden") == "true":
+            continue  # the hidden accordion-detail row that follows each feature row
+        classes = tr.get("class") or []
+        if not any(c.startswith("table-block-row") for c in classes):
+            continue
+        button = tr.find("button")
+        if not button or not button.get("aria-label"):
+            continue
+        feature = button["aria-label"].strip()
+        value_cells = [
+            td for td in tr.find_all("td")
+            if "table-block-cell-first" not in (td.get("class") or [])
+            and "table-block-cell-margin" not in (td.get("class") or [])
+        ]
+        if len(value_cells) != len(columns):
+            continue  # structure didn't match what we expected - skip rather than guess
+        values = [not td.get_text(strip=True).lower().endswith("inte") for td in value_cells]
+        rows.append({"feature": feature, "values": values})
+
+    if not rows:
+        return None
+    return {"columns": columns, "rows": rows}
+
+
+def fetch_car_insurance_comparison() -> dict | None:
+    """Live-fetch and parse LF Bergslagen's real car insurance comparison
+    table. Returns None (never a guessed/partial table) if the live fetch
+    is blocked and there's no cached copy, or if the page structure no
+    longer matches what this parser expects."""
+    url = LF_PAGES["car_insurance"]
+    _ensure_primed()
+
+    try:
+        response = _session.get(url, timeout=TIMEOUT_SECONDS)
+        response.raise_for_status()
+        response.encoding = response.apparent_encoding
+        if _looks_blocked(response.text):
+            raise requests.RequestException("blocked by anti-bot page")
+        parsed = _parse_car_insurance_table(response.text)
+        if parsed is None:
+            raise ValueError("comparison table structure not found on page")
+    except (requests.RequestException, ValueError):
+        cached = _read_cache(CAR_INSURANCE_TABLE_CACHE_KEY)
+        if not cached:
+            return None
+        try:
+            return json.loads(cached)
+        except json.JSONDecodeError:
+            return None
+
+    _write_cache(CAR_INSURANCE_TABLE_CACHE_KEY, json.dumps(parsed, ensure_ascii=False))
+    return parsed
+
+
+# Signals used to personalize the home insurance tier recommendation below -
+# same AND/OR keyword-matching style as the category/stage detectors in
+# agent.py, kept deterministic (no LLM guessing at the customer's situation).
+CONDO_KEYWORDS = [
+    "condo", "condominium", "apartment", "bostadsrätt", "bostadsratt",
+    "lägenhet", "lagenhet",
+]
+REMOTE_WORK_KEYWORDS = [
+    "work from home", "work remotely", "remote work", "working remotely",
+    "hemmakontor", "distansarbete", "jobbar hemifrån",
+]
+FREQUENT_TRAVEL_KEYWORDS = [
+    "travel a lot", "travel frequently", "frequent traveler", "travel internationally",
+    "international travel", "travel often",
+    "reser mycket", "reser ofta", "reser utomlands",
+]
+
+
+def compare_home_insurance(history: list[dict]) -> dict:
+    """Return LF Bergslagen's home insurance tier comparison (Bas/Mellan/
+    Stor - see HOME_INSURANCE_TIERS) plus a personalized tier recommendation
+    when the conversation gives enough signal (buying a condo, working
+    remotely, frequent international travel). Deterministic Python, not an
+    LLM guess - mirrors the rest of this codebase's rule that any decision
+    that actually matters is computed in code, with the LLM only narrating
+    around it. No recommendation is made (recommended_column stays None)
+    when none of the signals are present, rather than defaulting to a tier
+    that doesn't reflect this customer."""
+    combined = " ".join(m.get("content", "") for m in history if m.get("role") == "user").lower()
+    is_condo = any(kw in combined for kw in CONDO_KEYWORDS)
+    remote_worker = any(kw in combined for kw in REMOTE_WORK_KEYWORDS)
+    frequent_traveler = any(kw in combined for kw in FREQUENT_TRAVEL_KEYWORDS)
+
+    recommended_column = None
+    recommendation_note = None
+
+    if frequent_traveler:
+        recommended_column = 2
+        recommendation_note = (
+            "Because you travel internationally often, we recommend Stor for the extended "
+            "45-day travel cover, on top of full property and belongings protection. "
+        )
+    elif is_condo or remote_worker:
+        recommended_column = 1
+        reasons = []
+        if is_condo:
+            reasons.append("you're buying a condo (bostadsrätt)")
+        if remote_worker:
+            reasons.append("you work remotely, often on a personal laptop")
+        extras = []
+        if remote_worker:
+            extras.append("the Allrisk protection (covers accidents like a coffee spill on your laptop)")
+        if is_condo:
+            extras.append("the Bostadsrättstillägg add-on")
+        recommendation_note = (
+            f"Because {' and '.join(reasons)}, we recommend Mellan for "
+            f"{' plus '.join(extras)}. You likely don't need Stor unless you also travel "
+            "internationally multiple times a year."
+        )
+
+    table = copy.deepcopy(HOME_INSURANCE_TIERS)
+    table["type"] = "home_insurance_tiers"
+    table["recommended_column"] = recommended_column
+    table["recommendation_note"] = recommendation_note
+    return table
 
 
 def find_service_provider(category: str, location: str) -> str:

@@ -8,6 +8,7 @@ from .agents.fraud_dispute_agent import (
     wants_fraud_or_dispute,
 )
 from .agents.mortgage_agent import (
+    compute_transition_progress,
     loan_offer_flow_resolved,
     loan_promise_flow_resolved,
     run_loan_offer_agent,
@@ -20,6 +21,8 @@ from .link_safety import URL_RE, strip_unverified_links as _strip_unverified_lin
 from .llm_client import client
 from .suggestions import generate_suggestions
 from .tools import (
+    compare_home_insurance,
+    fetch_car_insurance_comparison,
     fetch_lf_page,
     find_home_search_link,
     find_service_provider,
@@ -60,7 +63,7 @@ försäkringen som stressar dig mest just nu, låt oss börja där."
 Before sending your reply, check sentence 1 against both rules above and rewrite it if
 it fails either one.
 
-You are Sara, a digital assistant that helps people think through major life events —
+You are Sara, a digital companion that helps people think through major life events —
 buying a house, moving in together, having a child, divorce, starting a business,
 retirement, buying a holiday home, buying a car, and similar transitions. You are provided by LF
 Bergslagen (Länsförsäkringar Bergslagen) and use their real, live product data as your
@@ -359,6 +362,34 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "compare_car_insurance",
+            "description": (
+                "Fetch LF Bergslagen's real, live tier comparison table for car insurance "
+                "(Helförsäkring/Halvförsäkring/Trafikförsäkring, feature by feature). Use "
+                "when the customer is deciding between car insurance levels. Takes no "
+                "arguments. May return that no table is available right now - in that case "
+                "fall back to fetch_lf_page(\"car_insurance\") instead."
+            ),
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "compare_home_insurance",
+            "description": (
+                "Return LF Bergslagen's home insurance tier comparison (Bas/Mellan/Stor) so "
+                "the customer can evaluate levels side by side, plus a personalized tier "
+                "recommendation when the conversation gives enough signal (e.g. buying a "
+                "condo, working remotely, frequent international travel). Takes no "
+                "arguments - it reads the conversation itself."
+            ),
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "verify_customer_identity",
             "description": (
                 "Verify a customer's identity by name, personnummer, and date of birth "
@@ -514,6 +545,40 @@ def _wants_home_search(history: list[dict]) -> bool:
     return any(w in text for w in HOME_SEARCH_PROPERTY_WORDS) and any(w in text for w in HOME_SEARCH_INTENT_WORDS)
 
 
+# Same AND-match style as HOME_SEARCH above: needs both a car-insurance
+# mention AND a compare/decide-between-levels signal, so "tell me about car
+# insurance" (handled fine by the general fetch_lf_page flow) doesn't
+# trigger the comparison table when the customer isn't actually choosing
+# between tiers.
+CAR_INSURANCE_WORDS = ["car insurance", "bilförsäkring", "bilforsakring"]
+INSURANCE_COMPARE_WORDS = [
+    "compare", "comparison", "which level", "which tier", "what level",
+    "difference between", "should i get", "should i choose", "which one",
+    "which is better", "full coverage or", " vs ", "versus", "which insurance",
+    "jämför", "skillnaden mellan", "vilken nivå", "vilken jag ska välja",
+]
+
+
+def _wants_car_insurance_comparison(history: list[dict]) -> bool:
+    last_user = next((m.get("content", "") for m in reversed(history) if m.get("role") == "user"), "")
+    text = last_user.lower()
+    return any(w in text for w in CAR_INSURANCE_WORDS) and any(w in text for w in INSURANCE_COMPARE_WORDS)
+
+
+# Same AND-match pattern for home insurance's own tier comparison (Bas/
+# Mellan/Stor) - see compare_home_insurance in tools.py.
+HOME_INSURANCE_WORDS = [
+    "home insurance", "hemförsäkring", "hemforsakring", "house insurance",
+    "villaförsäkring", "villaforsakring", "apartment insurance",
+]
+
+
+def _wants_home_insurance_comparison(history: list[dict]) -> bool:
+    last_user = next((m.get("content", "") for m in reversed(history) if m.get("role") == "user"), "")
+    text = last_user.lower()
+    return any(w in text for w in HOME_INSURANCE_WORDS) and any(w in text for w in INSURANCE_COMPARE_WORDS)
+
+
 def _detect_service_category(history: list[dict]) -> str | None:
     combined = " ".join(m.get("content", "") for m in history if m.get("role") == "user").lower()
     for category, keywords in CATEGORY_KEYWORDS.items():
@@ -639,6 +704,14 @@ def _wants_case_status(history: list[dict]) -> bool:
 
 
 def run_agent(history: list[dict], lang: str | None = None) -> tuple[str, list[str], dict]:
+    reply, suggestions, extra = _run_agent(history, lang)
+    progress = compute_transition_progress(history)
+    if progress:
+        extra = {**extra, "progress": progress}
+    return reply, suggestions, extra
+
+
+def _run_agent(history: list[dict], lang: str | None = None) -> tuple[str, list[str], dict]:
     if wants_human_contact(history):
         reply, suggestions, extra = contact_menu_response(lang)
         return reply, suggestions, extra
@@ -724,6 +797,43 @@ def run_agent(history: list[dict], lang: str | None = None) -> tuple[str, list[s
             }
         )
 
+    if _wants_car_insurance_comparison(history):
+        messages.append(
+            {
+                "role": "system",
+                "content": (
+                    "The user is deciding between car insurance levels - call "
+                    "compare_car_insurance this turn. It returns LF Bergslagen's real, live "
+                    "tier comparison table - a structured table is rendered separately in the "
+                    "UI from this result, so your reply text should narrate/summarize it "
+                    "briefly (e.g. which tier covers what, and a plain-language recommendation "
+                    "if the conversation gives you enough to base one on) rather than "
+                    "re-listing every row. If the tool result says no table is available, fall "
+                    "back to fetch_lf_page(\"car_insurance\") instead and describe it in text as "
+                    "usual - never invent table rows of your own."
+                ),
+            }
+        )
+
+    if _wants_home_insurance_comparison(history):
+        messages.append(
+            {
+                "role": "system",
+                "content": (
+                    "The user is deciding between home insurance levels - call "
+                    "compare_home_insurance this turn. It returns LF Bergslagen's Bas/Mellan/"
+                    "Stor tier comparison and, when the conversation gives enough signal "
+                    "(buying a condo, working remotely, frequent international travel), a "
+                    "personalized recommended tier - a structured table (with a recommendation "
+                    "badge/footnote if one was computed) is rendered separately in the UI from "
+                    "this result, so your reply text should narrate/summarize it briefly rather "
+                    "than re-listing every row. If a recommendation was computed, you may "
+                    "briefly reinforce it in your own words, but never invent a different tier "
+                    "or reasoning than what the tool actually returned."
+                ),
+            }
+        )
+
     identity_flow = _detect_identity_flow(history)
     if identity_flow and not _identity_flow_resolved(history):
         messages.append(
@@ -783,9 +893,11 @@ def run_agent(history: list[dict], lang: str | None = None) -> tuple[str, list[s
         or (_wants_callback(history) and not _callback_already_resolved(history))
         or _wants_case_status(history)
         or _wants_home_search(history)
+        or _wants_car_insurance_comparison(history)
     )
 
     seen_urls: set[str] = set()
+    comparison_table: dict | None = None
 
     for round_index in range(MAX_TOOL_ROUNDS):
         # The model isn't reliably grounding itself on its own - it sometimes
@@ -826,7 +938,8 @@ def run_agent(history: list[dict], lang: str | None = None) -> tuple[str, list[s
             last_user_message = next(
                 (m.get("content", "") for m in reversed(history) if m.get("role") == "user"), ""
             )
-            return reply, generate_suggestions(last_user_message, reply), {}
+            extra = {"comparison_table": comparison_table} if comparison_table else {}
+            return reply, generate_suggestions(last_user_message, reply), extra
 
         for call in tool_calls:
             try:
@@ -856,6 +969,40 @@ def run_agent(history: list[dict], lang: str | None = None) -> tuple[str, list[s
                     args.get("location", ""), args.get("property_type", ""), args.get("price_range", "")
                 )
                 seen_urls.update(URL_RE.findall(result))
+            elif name == "compare_car_insurance":
+                table = fetch_car_insurance_comparison()
+                if table:
+                    comparison_table = table
+                    result = (
+                        f"Loaded the real comparison table: {len(table['rows'])} features across "
+                        f"{len(table['columns'])} tiers ({', '.join(table['columns'])}). It will be "
+                        "shown to the customer as a table separately - summarize it briefly in your "
+                        "reply text, don't re-list every row."
+                    )
+                else:
+                    result = (
+                        "No comparison table available right now (live fetch blocked and no cached "
+                        "copy). Call fetch_lf_page(\"car_insurance\") instead and describe it in text."
+                    )
+            elif name == "compare_home_insurance":
+                comparison_table = compare_home_insurance(history)
+                if comparison_table["recommended_column"] is not None:
+                    recommended_tier = comparison_table["columns"][comparison_table["recommended_column"]]
+                    result = (
+                        f"Loaded the home insurance tier comparison ({', '.join(comparison_table['columns'])}). "
+                        f"Based on this conversation, {recommended_tier} is recommended - reasoning: "
+                        f"{comparison_table['recommendation_note']} The table and this recommendation are "
+                        "shown to the customer separately in the UI - briefly summarize/reinforce it in "
+                        "your reply text, don't re-list every row or invent different reasoning."
+                    )
+                else:
+                    result = (
+                        f"Loaded the home insurance tier comparison ({', '.join(comparison_table['columns'])}). "
+                        "Not enough signal in this conversation yet to recommend a specific tier - the table "
+                        "is shown to the customer separately in the UI; briefly summarize it in your reply "
+                        "text and, if useful, ask a clarifying question (e.g. condo vs house, how often they "
+                        "travel) so a personalized recommendation can be made next turn."
+                    )
             else:
                 topic = args.get("topic", "")
                 result = fetch_lf_page(topic)

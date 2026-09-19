@@ -24,8 +24,10 @@ from sqlalchemy import (
     Column,
     DateTime,
     Float,
+    ForeignKey,
     Integer,
     String,
+    Text,
     create_engine,
     func,
 )
@@ -84,6 +86,35 @@ class OfferEvent(Base):
     segment = Column(String(64), nullable=False)
     event_type = Column(String(16), nullable=False)  # "impression" | "click"
     resolved = Column(Boolean, nullable=False, default=False)  # impressions only
+    ts = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+class ChatSession(Base):
+    """One row per chat widget session - see sessions.py, which used to keep
+    this purely in-memory (wiped on every server restart, including a dev
+    `--reload`). Persisting it here means a customer's chat, and an agent's
+    in-progress hand-off, survives a restart instead of silently 404ing the
+    next time the sidebar tries to reopen it."""
+
+    __tablename__ = "chat_sessions"
+
+    session_id = Column(String(64), primary_key=True)
+    needs_human = Column(Boolean, nullable=False, default=False)
+    assigned_agent = Column(String(128), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+class ChatMessage(Base):
+    """One row per message in a chat session (user/assistant/human) - see
+    ChatSession above."""
+
+    __tablename__ = "chat_messages"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    session_id = Column(String(64), ForeignKey("chat_sessions.session_id"), nullable=False, index=True)
+    role = Column(String(16), nullable=False)
+    content = Column(Text, nullable=False)
+    agent_name = Column(String(128), nullable=True)
     ts = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
 
 
@@ -206,3 +237,101 @@ def sample_offer_score(segment: str, offer_code: str) -> float:
         stat = get_or_create_offer_stat(db, segment, offer_code)
         db.commit()
         return random.betavariate(stat.alpha, stat.beta)
+
+
+# --- Chat session persistence (see ChatSession/ChatMessage above) ----------
+
+def _message_to_dict(message: ChatMessage) -> dict:
+    result = {"role": message.role, "content": message.content, "ts": message.ts.isoformat()}
+    if message.agent_name:
+        result["agent_name"] = message.agent_name
+    return result
+
+
+def _ensure_chat_session(db: Session, session_id: str) -> ChatSession:
+    row = db.get(ChatSession, session_id)
+    if row is None:
+        row = ChatSession(session_id=session_id)
+        db.add(row)
+        db.flush()
+    return row
+
+
+def get_or_create_chat_session(session_id: str) -> dict:
+    with _session() as db:
+        row = _ensure_chat_session(db, session_id)
+        db.commit()
+        return {"messages": [], "needs_human": row.needs_human, "assigned_agent": row.assigned_agent}
+
+
+def add_chat_message(session_id: str, role: str, content: str, agent_name: str | None = None) -> int:
+    with _session() as db:
+        _ensure_chat_session(db, session_id)
+        db.add(ChatMessage(session_id=session_id, role=role, content=content, agent_name=agent_name))
+        db.commit()
+        return db.query(ChatMessage).filter(ChatMessage.session_id == session_id).count()
+
+
+def set_chat_needs_human(session_id: str) -> None:
+    with _session() as db:
+        row = _ensure_chat_session(db, session_id)
+        row.needs_human = True
+        db.commit()
+
+
+def set_chat_assigned_agent(session_id: str, agent_name: str) -> None:
+    with _session() as db:
+        row = _ensure_chat_session(db, session_id)
+        row.assigned_agent = agent_name
+        db.commit()
+
+
+def get_chat_messages_after(session_id: str, after: int) -> list[dict]:
+    with _session() as db:
+        messages = (
+            db.query(ChatMessage)
+            .filter(ChatMessage.session_id == session_id)
+            .order_by(ChatMessage.id)
+            .all()
+        )
+        return [_message_to_dict(m) for m in messages[after:]]
+
+
+def get_chat_session(session_id: str) -> dict | None:
+    with _session() as db:
+        row = db.get(ChatSession, session_id)
+        if row is None:
+            return None
+        messages = (
+            db.query(ChatMessage)
+            .filter(ChatMessage.session_id == session_id)
+            .order_by(ChatMessage.id)
+            .all()
+        )
+        return {
+            "messages": [_message_to_dict(m) for m in messages],
+            "needs_human": row.needs_human,
+            "assigned_agent": row.assigned_agent,
+        }
+
+
+def list_chat_session_summaries() -> list[dict]:
+    with _session() as db:
+        summaries = []
+        for row in db.query(ChatSession).all():
+            last = (
+                db.query(ChatMessage)
+                .filter(ChatMessage.session_id == row.session_id)
+                .order_by(ChatMessage.id.desc())
+                .first()
+            )
+            count = db.query(ChatMessage).filter(ChatMessage.session_id == row.session_id).count()
+            summaries.append({
+                "session_id": row.session_id,
+                "needs_human": row.needs_human,
+                "message_count": count,
+                "last_message": last.content[:120] if last else "",
+                "last_ts": last.ts.isoformat() if last else "",
+            })
+        summaries.sort(key=lambda s: s["last_ts"], reverse=True)
+        return summaries

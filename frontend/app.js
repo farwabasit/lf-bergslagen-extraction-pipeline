@@ -7,6 +7,7 @@ const fileInput = document.getElementById("file-input");
 const attachmentPreviewEl = document.getElementById("attachment-preview");
 const micBtn = document.getElementById("mic-btn");
 const humanBtn = document.getElementById("human-btn");
+const humanBtnLabel = document.getElementById("human-btn-label");
 const langToggleEl = document.getElementById("lang-toggle");
 let greetingLabelEl = document.getElementById("greeting-label");
 let greetingTextEl = document.getElementById("greeting-text");
@@ -14,25 +15,32 @@ const sendBtn = document.getElementById("send-btn");
 const homeBtn = document.getElementById("home-btn");
 const newChatBtn = document.getElementById("new-chat-btn");
 const chatListEl = document.getElementById("chat-list");
+const chatSearchInputEl = document.getElementById("chat-search-input");
 const sidebarHideBtn = document.getElementById("sidebar-hide-btn");
 const sidebarShowBtn = document.getElementById("sidebar-show-btn");
 const chatShellEl = document.querySelector(".chat-shell");
 const ratingBarEl = document.getElementById("rating-bar");
 const ratingLabelEl = document.getElementById("rating-label");
 const ratingStarsEl = document.getElementById("rating-stars");
+const progressRingBarEl = document.getElementById("progress-ring-bar");
+const progressRingFillEl = document.getElementById("progress-ring-fill");
+const progressRingPercentEl = document.getElementById("progress-ring-percent");
+const progressRingTitleEl = document.getElementById("progress-ring-title");
+const progressStepsEl = document.getElementById("progress-steps");
+const PROGRESS_RING_CIRCUMFERENCE = 2 * Math.PI * 28;
 
 // The toggle sets the UI language and is a fallback for ambiguous messages,
 // but the backend still matches whatever language the user actually types
 // whenever that's clear -- see the LANGUAGE RULE in backend/agent.py.
 const I18N = {
   en: {
-    brandSub: "Digital assistant · LF Bergslagen",
-    greetingLabel: "Sara · AI assistant",
+    brandSub: "LF Bergslagen",
+    greetingLabel: "Sara · Digital Companion",
     greeting:
-      "Hej! I'm Sara, LF Bergslagen's digital assistant. Tell me what's changing in your life, and I'll help you think it through.",
+      "Hej! I'm Sara, LF Bergslagen's digital companion. Tell me what's changing in your life, and I'll help you think it through.",
     placeholder: "Tell me what's happening in your life...",
     send: "Send",
-    humanBtn: "Talk to a person",
+    humanBtn: "Contact us",
     humanConnecting: "Connecting...",
     humanNote:
       "You've asked to speak with a colleague at LF Bergslagen. They'll join this chat as soon as they're available — keep this page open.",
@@ -41,8 +49,11 @@ const I18N = {
     micTitle: "Speak instead of typing",
     sidebarHideTitle: "Hide previous chats",
     sidebarShowTitle: "Show previous chats",
+    chatSearchPlaceholder: "Search previous chats...",
+    chatSearchEmpty: "No chats match your search.",
+    chatGoneNotice: "That chat is no longer available on the server and was removed from this list.",
     supportLabel: "LF Bergslagen · Support",
-    aiLabel: "Sara · AI assistant",
+    aiLabel: "Sara · Digital Companion",
     thinking: "Thinking...",
     uploadError: "Couldn't read one of those files. Try files under 5MB each.",
     chatError: "Something went wrong reaching the navigator. Please try again.",
@@ -69,13 +80,13 @@ const I18N = {
     ],
   },
   sv: {
-    brandSub: "Digital assistent · LF Bergslagen",
-    greetingLabel: "Sara · AI-assistent",
+    brandSub: "LF Bergslagen",
+    greetingLabel: "Sara · Digital följeslagare",
     greeting:
-      "Hej! Jag heter Sara och är LF Bergslagens digitala assistent. Berätta vad som händer i ditt liv, så hjälper jag dig tänka igenom det.",
+      "Hej! Jag heter Sara och är LF Bergslagens digitala följeslagare. Berätta vad som händer i ditt liv, så hjälper jag dig tänka igenom det.",
     placeholder: "Berätta vad som händer i ditt liv...",
     send: "Skicka",
-    humanBtn: "Prata med en person",
+    humanBtn: "Kontakta oss",
     humanConnecting: "Kopplar upp...",
     humanNote:
       "Du har bett om att prata med en kollega på LF Bergslagen. De ansluter till chatten så snart de kan — håll sidan öppen.",
@@ -84,8 +95,11 @@ const I18N = {
     micTitle: "Prata istället för att skriva",
     sidebarHideTitle: "Dölj tidigare chattar",
     sidebarShowTitle: "Visa tidigare chattar",
+    chatSearchPlaceholder: "Sök i tidigare chattar...",
+    chatSearchEmpty: "Inga chattar matchar din sökning.",
+    chatGoneNotice: "Den chatten finns inte längre på servern och togs bort från listan.",
     supportLabel: "LF Bergslagen · Support",
-    aiLabel: "Sara · AI-assistent",
+    aiLabel: "Sara · Digital följeslagare",
     thinking: "Tänker...",
     uploadError: "Kunde inte läsa en av filerna. Prova filer under 5 MB styck.",
     chatError: "Något gick fel. Försök igen.",
@@ -130,11 +144,13 @@ function applyLanguage(lang) {
   greetingTextEl.textContent = strings.greeting;
   inputEl.placeholder = strings.placeholder;
   sendBtn.textContent = strings.send;
-  humanBtn.textContent = strings.humanBtn;
+  humanBtnLabel.textContent = strings.humanBtn;
   attachBtn.title = strings.attachTitle;
   micBtn.title = strings.micTitle;
   sidebarHideBtn.title = strings.sidebarHideTitle;
   sidebarShowBtn.title = strings.sidebarShowTitle;
+  chatSearchInputEl.placeholder = strings.chatSearchPlaceholder;
+  renderChatList();
   if (!ratingSubmitted) ratingLabelEl.textContent = strings.rateLabel;
 
   chipsEl.innerHTML = "";
@@ -707,6 +723,168 @@ function addForm(form) {
   messagesEl.scrollTop = messagesEl.scrollHeight;
 }
 
+// --- Comparison table (e.g. car insurance tiers) - real, structured data
+// the backend scraped from LF Bergslagen's own live page (see
+// compare_car_insurance / fetch_car_insurance_comparison in the backend),
+// rendered as an actual table instead of the model re-typing every row as
+// prose. Mirrors addForm/addOffers above: reads one more field off the
+// same /api/chat response and appends its own element to #messages. ---
+function addComparisonTable(table) {
+  if (!table || !table.columns || !table.rows || !table.rows.length) return;
+
+  const wrapper = document.createElement("div");
+  wrapper.className = "comparison-table-wrapper";
+
+  if (table.type === "home_insurance_tiers") {
+    renderTierComparisonTable(wrapper, table);
+  } else {
+    renderBooleanComparisonTable(wrapper, table);
+  }
+
+  messagesEl.appendChild(wrapper);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+function renderBooleanComparisonTable(wrapper, table) {
+  const scroller = document.createElement("div");
+  scroller.className = "comparison-table-scroll";
+
+  const headCells = table.columns.map((c) => `<th>${escapeHtml(c)}</th>`).join("");
+  const bodyRows = table.rows
+    .map((row) => {
+      const cells = row.values
+        .map((v) => `<td class="${v ? "cmp-yes" : "cmp-no"}">${v ? "✓" : "—"}</td>`)
+        .join("");
+      return `<tr><th scope="row">${escapeHtml(row.feature)}</th>${cells}</tr>`;
+    })
+    .join("");
+
+  scroller.innerHTML = `
+    <table class="comparison-table">
+      <thead><tr><th></th>${headCells}</tr></thead>
+      <tbody>${bodyRows}</tbody>
+    </table>
+  `;
+  wrapper.appendChild(scroller);
+}
+
+// --- Home insurance tier comparison (Bas/Mellan/Stor) - text-per-cell
+// rather than checkmarks, an optional "AI Recommendation for You" badge
+// above whichever column compare_home_insurance (backend) decided fits this
+// conversation, a footnote explaining why, and a client-side Single/
+// Co-living toggle that swaps the price row using values already present in
+// the response (no extra round-trip needed). See compare_home_insurance in
+// backend/tools.py for where recommended_column/recommendation_note and the
+// price row's co_living_values come from. ---
+function renderTierComparisonTable(wrapper, table) {
+  const recommendedIndex = table.recommended_column;
+  const priceRowIndex = table.rows.findIndex((row) => row.co_living_values);
+
+  if (priceRowIndex !== -1) {
+    const toggle = document.createElement("div");
+    toggle.className = "tier-toggle";
+    toggle.innerHTML = `
+      <button type="button" class="tier-toggle-btn active" data-mode="values">Single Person</button>
+      <button type="button" class="tier-toggle-btn" data-mode="co_living_values">Co-living / Partner</button>
+    `;
+    wrapper.appendChild(toggle);
+  }
+
+  if (recommendedIndex != null) {
+    const badgeRow = document.createElement("div");
+    badgeRow.className = "tier-badge-row";
+    table.columns.forEach((_, i) => {
+      const cell = document.createElement("span");
+      cell.className = "tier-badge-cell";
+      if (i === recommendedIndex) cell.innerHTML = `<span class="tier-badge">✨ AI Recommendation for You</span>`;
+      badgeRow.appendChild(cell);
+    });
+    wrapper.appendChild(badgeRow);
+  }
+
+  const scroller = document.createElement("div");
+  scroller.className = "comparison-table-scroll";
+
+  const headCells = table.columns
+    .map((c, i) => `<th class="${i === recommendedIndex ? "tier-recommended" : ""}">${escapeHtml(c)}</th>`)
+    .join("");
+  const bodyRows = table.rows
+    .map((row, rowIndex) => {
+      const cells = row.values
+        .map(
+          (v, i) =>
+            `<td class="${i === recommendedIndex ? "tier-recommended" : ""}" data-row="${rowIndex}">${escapeHtml(v)}</td>`
+        )
+        .join("");
+      return `<tr><th scope="row">${escapeHtml(row.feature)}</th>${cells}</tr>`;
+    })
+    .join("");
+
+  scroller.innerHTML = `
+    <table class="comparison-table comparison-table-detail">
+      <thead><tr><th></th>${headCells}</tr></thead>
+      <tbody>${bodyRows}</tbody>
+    </table>
+  `;
+  wrapper.appendChild(scroller);
+
+  if (priceRowIndex !== -1) {
+    const buttons = wrapper.querySelectorAll(".tier-toggle-btn");
+    buttons.forEach((btn) => {
+      btn.addEventListener("click", () => {
+        buttons.forEach((b) => b.classList.toggle("active", b === btn));
+        const values = table.rows[priceRowIndex][btn.dataset.mode];
+        scroller.querySelectorAll(`td[data-row="${priceRowIndex}"]`).forEach((cell, i) => {
+          cell.textContent = values[i];
+        });
+      });
+    });
+  }
+
+  if (table.recommendation_note) {
+    const note = document.createElement("div");
+    note.className = "tier-recommendation-note";
+    note.innerHTML = `<strong>Why we suggest this:</strong> ${escapeHtml(table.recommendation_note)}`;
+    wrapper.appendChild(note);
+  }
+}
+
+// --- Task Completion Ring: gamifies progress through a mortgage flow (Loan
+// Promise / Loan Offer) once the customer has actually started one - see
+// compute_transition_progress in backend/agents/mortgage_agent.py, which
+// derives it from the conversation transcript itself (no separate session
+// state). Sticky above #messages instead of appended per-turn, since it
+// reflects one running total rather than a one-off event like a table. ---
+function updateProgressRing(progress) {
+  if (!progress) {
+    progressRingBarEl.hidden = true;
+    return;
+  }
+
+  progressRingBarEl.hidden = false;
+  progressRingTitleEl.textContent = progress.flow;
+  progressRingPercentEl.textContent = `${progress.percent}%`;
+
+  const offset = PROGRESS_RING_CIRCUMFERENCE * (1 - progress.percent / 100);
+  progressRingFillEl.style.strokeDasharray = String(PROGRESS_RING_CIRCUMFERENCE);
+  progressRingFillEl.style.strokeDashoffset = String(offset);
+
+  progressStepsEl.innerHTML = "";
+  progress.steps.forEach((step, index) => {
+    const stepEl = document.createElement("div");
+    stepEl.className = "progress-step" + (step.done ? " done" : "");
+    const dot = document.createElement("span");
+    dot.className = "progress-step-dot";
+    dot.textContent = step.done ? "✓" : String(index + 1);
+    const label = document.createElement("span");
+    label.className = "progress-step-label";
+    label.textContent = step.label;
+    stepEl.appendChild(dot);
+    stepEl.appendChild(label);
+    progressStepsEl.appendChild(stepEl);
+  });
+}
+
 // --- Satisfaction rating: a small, optional "how helpful was this chat"
 // star control. Never blocks the conversation - it just becomes visible
 // once there's been at least one reply, and can be clicked at any time. ---
@@ -793,6 +971,8 @@ async function getAssistantReply() {
     addSuggestions(data.suggestions, data.human_chat_option);
     addForm(data.form);
     addOffers(data.offers, data.offers_customer_id);
+    addComparisonTable(data.comparison_table);
+    updateProgressRing(data.progress);
     showRatingBar();
   } catch (err) {
     pending.textContent = t().chatError;
@@ -1071,7 +1251,7 @@ if (SpeechRecognitionImpl) {
 
 async function requestHumanHandoff() {
   humanBtn.disabled = true;
-  humanBtn.textContent = t().humanConnecting;
+  humanBtnLabel.textContent = t().humanConnecting;
   try {
     await fetch(`/api/sessions/${sessionId}/request-human`, { method: "POST" });
     addBubble("system-note", t().humanNote);
@@ -1079,7 +1259,7 @@ async function requestHumanHandoff() {
   } catch (err) {
     console.error(err);
     humanBtn.disabled = false;
-    humanBtn.textContent = t().humanBtn;
+    humanBtnLabel.textContent = t().humanBtn;
   }
 }
 
@@ -1115,6 +1295,24 @@ async function pollForHumanMessages() {
 
 setInterval(pollForHumanMessages, 3000);
 
+// --- Brief, self-dismissing status message - currently only used to explain
+// why a sidebar chat just vanished (see loadChat's 404 branch below), rather
+// than leaving that silent and looking like a bug. ---
+let toastTimer = null;
+function showToast(message) {
+  let toast = document.getElementById("toast");
+  if (!toast) {
+    toast = document.createElement("div");
+    toast.id = "toast";
+    toast.className = "toast";
+    document.body.appendChild(toast);
+  }
+  toast.textContent = message;
+  toast.classList.add("visible");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toast.classList.remove("visible"), 4000);
+}
+
 // --- Chat history sidebar (past chats, persisted locally; full transcript
 // lives server-side in the session store and is refetched when reopened) ---
 
@@ -1130,25 +1328,50 @@ function saveChatList(list) {
   localStorage.setItem("ltn-chat-list", JSON.stringify(list));
 }
 
+// searchText holds every message in the conversation so far (not just the
+// title) - kept alongside title/ts precisely so the search box below can
+// find a past chat by anything said in it, not only by its opening line.
+function buildSearchText(messages) {
+  return messages.map((m) => m.content || "").join(" \n ").toLowerCase();
+}
+
 function upsertChatListEntry() {
   if (!history.length) return;
   const list = loadChatList();
   const existing = list.find((c) => c.id === sessionId);
   if (existing) {
     existing.ts = Date.now();
+    existing.searchText = buildSearchText(history);
   } else {
     const firstUserMsg = history.find((m) => m.role === "user");
     const title = firstUserMsg ? firstUserMsg.content.slice(0, 60) : "Chat";
-    list.unshift({ id: sessionId, title, ts: Date.now() });
+    list.unshift({ id: sessionId, title, ts: Date.now(), searchText: buildSearchText(history) });
   }
   saveChatList(list);
   renderChatList();
 }
 
 function renderChatList() {
+  const query = (chatSearchInputEl.value || "").trim().toLowerCase();
   const list = loadChatList().sort((a, b) => b.ts - a.ts);
+  const filtered = query
+    ? list.filter(
+        (chat) =>
+          (chat.title || "").toLowerCase().includes(query) || (chat.searchText || "").includes(query)
+      )
+    : list;
+
   chatListEl.innerHTML = "";
-  for (const chat of list) {
+
+  if (query && !filtered.length) {
+    const empty = document.createElement("div");
+    empty.className = "chat-search-empty";
+    empty.textContent = t().chatSearchEmpty;
+    chatListEl.appendChild(empty);
+    return;
+  }
+
+  for (const chat of filtered) {
     const item = document.createElement("div");
     item.className = "chat-item" + (chat.id === sessionId ? " active" : "");
     item.textContent = chat.title || "Chat";
@@ -1157,6 +1380,8 @@ function renderChatList() {
     chatListEl.appendChild(item);
   }
 }
+
+chatSearchInputEl.addEventListener("input", () => renderChatList());
 
 function resetChatView() {
   messagesEl.innerHTML = "";
@@ -1174,8 +1399,9 @@ function resetChatView() {
   inputEl.value = "";
   inputEl.style.height = "auto";
   humanBtn.disabled = false;
-  humanBtn.textContent = t().humanBtn;
+  humanBtnLabel.textContent = t().humanBtn;
   resetRatingWidget();
+  updateProgressRing(null);
 
   applyLanguage(currentLang);
 }
@@ -1189,6 +1415,7 @@ function startNewChat() {
   sessionId = crypto.randomUUID();
   sessionStorage.setItem("ltn-session-id", sessionId);
   resetChatView();
+  chatSearchInputEl.value = "";
   renderChatList();
 }
 
@@ -1218,7 +1445,18 @@ async function loadChat(id) {
   if (speechSupported) window.speechSynthesis.cancel();
   try {
     const res = await fetch(`/api/sessions/${id}`);
-    if (!res.ok) return;
+    if (!res.ok) {
+      // The server no longer knows this chat (e.g. it predates this
+      // browser's chat history being made durable server-side) - drop it
+      // from the sidebar instead of leaving a dead entry that does nothing
+      // when clicked.
+      if (res.status === 404) {
+        saveChatList(loadChatList().filter((c) => c.id !== id));
+        renderChatList();
+        showToast(t().chatGoneNotice);
+      }
+      return;
+    }
     const data = await res.json();
 
     sessionId = id;
@@ -1231,6 +1469,15 @@ async function loadChat(id) {
       .map((m) => ({ role: m.role, content: m.content }));
 
     messagesEl.innerHTML = "";
+    if (!data.messages.length) {
+      // A session row can exist server-side with no messages yet (e.g. only
+      // "talk to a person" was clicked before anything was said) - show the
+      // greeting rather than leaving the panel blank, same as a new chat.
+      const greetingDiv = document.createElement("div");
+      greetingDiv.className = "msg assistant";
+      greetingDiv.innerHTML = `<span class="msg-label">${escapeHtml(t().greetingLabel)}</span><p>${escapeHtml(t().greeting)}</p>`;
+      messagesEl.appendChild(greetingDiv);
+    }
     chipsEl.style.display = "none";
     for (const msg of data.messages) {
       if (msg.role === "user") {
@@ -1250,6 +1497,16 @@ async function loadChat(id) {
     }
     resetRatingWidget();
     if (history.some((m) => m.role === "assistant")) showRatingBar();
+    updateProgressRing(null);
+
+    // Backfills searchText for chats saved before the search box existed
+    // (or reopened after a page reload without a new message sent yet).
+    const list = loadChatList();
+    const entry = list.find((c) => c.id === sessionId);
+    if (entry) {
+      entry.searchText = buildSearchText(history);
+      saveChatList(list);
+    }
     renderChatList();
   } catch (err) {
     console.error(err);

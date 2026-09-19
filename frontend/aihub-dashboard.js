@@ -134,6 +134,20 @@ async function loadDashboard() {
   renderMiniList($("handoff-list"), data.handoffs.by_topic);
   renderMiniList($("cases-list"), data.cases_triggered.by_topic);
 
+  $("customer-insights-body").innerHTML = data.customer_insights.length
+    ? data.customer_insights
+        .map(
+          (i) => `
+      <tr>
+        <td>${escapeHtml(i.label)}</td>
+        <td>${formatNumber(i.count)}</td>
+        <td>${i.average.toFixed(2)} ${starString(i.average)}</td>
+        <td>${i.needs_attention ? '<span class="badge warn">Needs attention</span>' : ""}</td>
+      </tr>`
+        )
+        .join("")
+    : '<tr><td colspan="4" class="empty-hint">No ratings submitted yet.</td></tr>';
+
   // --- Section B: agent performance / technical ---
   $("stat-total-calls").textContent = formatNumber(data.technical.total_llm_calls);
   const models = Object.entries(data.technical.models_used || {});
