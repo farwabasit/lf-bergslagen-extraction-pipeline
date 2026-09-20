@@ -53,6 +53,37 @@ LOAN_OFFER_KEYWORDS = [
     "ansöka om låneerbjudande", "vill ha ett låneerbjudande",
 ]
 
+# A bare mention of "loan promise"/"lånelöfte" (or the loan-offer
+# equivalent) is treated as application intent below - but "What is
+# Lånelöfte?" is a customer asking for an EXPLANATION, not to start
+# verifying their identity and applying. Matched against the start of the
+# message (after stripping leading whitespace/punctuation) since a
+# question phrased this way always leads with one of these forms.
+CLARIFYING_QUESTION_RE = re.compile(
+    r"^\s*(what('| i)?s|what does|explain|tell me about|how does|how do(es)? .* work|"
+    r"vad är|vad betyder|förklara|hur fungerar)\b",
+    re.IGNORECASE,
+)
+
+
+def _mentions_application_intent(history: list[dict], bare_terms: list[str], keyword_phrases: list[str]) -> bool:
+    """True if some user message signals wanting to actually START an
+    application - either one of the specific keyword_phrases (which already
+    read as a request, e.g. "apply for a loan promise"), or a bare mention
+    of the product name/term (bare_terms) in a message that isn't just
+    asking what it means (see CLARIFYING_QUESTION_RE) - a customer's own
+    wording varies too much for a fixed phrase list to cover every way of
+    asking for one, but "what is X" is a distinct, detectable shape."""
+    user_messages = [m.get("content", "") for m in history if m.get("role") == "user"]
+    combined = " ".join(user_messages).lower()
+    if any(kw in combined for kw in keyword_phrases):
+        return True
+    for msg in user_messages:
+        text = msg.lower()
+        if any(term in text for term in bare_terms) and not CLARIFYING_QUESTION_RE.match(msg.strip()):
+            return True
+    return False
+
 # Exact phrases each flow is instructed to include verbatim at each of its
 # possible endpoints - lets Sara/this file detect from plain conversation
 # history whether a flow already finished, without needing separate session
@@ -92,14 +123,12 @@ ASK_IDENTITY_TEXT = {
     # see AUTH_CHOICE_TEXT below.
     "loan_offer": {
         "en": (
-            "I'm the mortgage specialist Sara connected you with. To start your Loan "
-            "Offer application, I need to verify your identity - please fill in your "
-            "details below."
+            "To start your Loan Offer application, I need to verify your identity - "
+            "please fill in your details below."
         ),
         "sv": (
-            "Jag är bolånespecialisten som Sara kopplade dig till. För att starta din "
-            "ansökan om låneerbjudande behöver jag verifiera din identitet - fyll i "
-            "dina uppgifter nedan."
+            "För att starta din ansökan om låneerbjudande behöver jag verifiera din "
+            "identitet - fyll i dina uppgifter nedan."
         ),
     },
 }
@@ -116,13 +145,12 @@ AUTH_CHOICE_TEXT = {
         # loan_promise_flow_resolved() see this introductory line and treat the
         # whole application as already finished one turn in.
         "en": (
-            "I'm the mortgage specialist Sara connected you with. To start your "
-            "Lånelöfte (Loan Promise) application, I first need to verify your "
-            "identity via BankID."
+            "To start your Lånelöfte (Loan Promise) application, I first need to "
+            "verify your identity via BankID."
         ),
         "sv": (
-            "Jag är bolånespecialisten som Sara kopplade dig till. För att starta din "
-            "ansökan om lånelöfte behöver jag först verifiera din identitet via BankID."
+            "För att starta din ansökan om lånelöfte behöver jag först verifiera din "
+            "identitet via BankID."
         ),
     },
 }
@@ -236,8 +264,7 @@ LOAN_OFFER_INTRO_MARKER = "Would you like to proceed with your Loan Offer applic
 LOAN_OFFER_INTRO_MARKER_SV = "Vill du gå vidare med din ansökan om låneerbjudande?"
 LOAN_OFFER_INTRO_TEXT = {
     "en": (
-        "I'm the mortgage specialist Sara connected you with. Before we start, here's "
-        "what a Loan Offer application involves:\n\n"
+        "Before we start, here's what a Loan Offer application involves:\n\n"
         "**What a Loan Offer is:** once you've won a bidding or signed a purchase "
         "agreement for a specific property, a Loan Offer is the bank's firm, binding "
         "mortgage terms for that property - the loan amount, interest rate, and monthly "
@@ -258,8 +285,7 @@ LOAN_OFFER_INTRO_TEXT = {
         f"{LOAN_OFFER_INTRO_MARKER}"
     ),
     "sv": (
-        "Jag är bolånespecialisten som Sara kopplade dig till. Innan vi börjar, här är "
-        "vad en ansökan om låneerbjudande innebär:\n\n"
+        "Innan vi börjar, här är vad en ansökan om låneerbjudande innebär:\n\n"
         "**Vad ett låneerbjudande är:** när du har vunnit en budgivning eller skrivit på "
         "ett köpekontrakt för en specifik bostad, är låneerbjudandet bankens fasta, "
         "bindande lånevillkor för just den bostaden - lånebelopp, ränta och "
@@ -348,23 +374,18 @@ def _loan_offer_docs_confirm_shown(history: list[dict]) -> bool:
 
 
 def wants_loan_promise_application(history: list[dict]) -> bool:
-    combined = " ".join(m.get("content", "") for m in history if m.get("role") == "user").lower()
-    # "loan promise"/"lånelöfte" on its own is checked first and separately
-    # from the full LOAN_PROMISE_KEYWORDS phrases below: a suggestion chip
-    # or a customer's own wording varies ("Apply for mortgage loan promise",
-    # "I'd like the loan promise please", ...) far more than a fixed phrase
-    # list can enumerate, but the product name itself is specific enough
-    # (never used to mean anything else in this app) to trigger on alone.
-    if "loan promise" in combined or "lånelöfte" in combined:
-        return True
-    return any(kw in combined for kw in LOAN_PROMISE_KEYWORDS)
+    # "loan promise"/"lånelöfte" on its own is treated as intent - a
+    # suggestion chip or a customer's own wording varies ("Apply for
+    # mortgage loan promise", "I'd like the loan promise please", ...) far
+    # more than a fixed phrase list can enumerate, but the product name
+    # itself is specific enough (never used to mean anything else in this
+    # app) to trigger on alone - EXCEPT when it's just a clarifying
+    # question ("What is Lånelöfte?"), see _mentions_application_intent.
+    return _mentions_application_intent(history, ["loan promise", "lånelöfte"], LOAN_PROMISE_KEYWORDS)
 
 
 def wants_loan_offer_application(history: list[dict]) -> bool:
-    combined = " ".join(m.get("content", "") for m in history if m.get("role") == "user").lower()
-    if "loan offer" in combined or "låneerbjudande" in combined:
-        return True
-    return any(kw in combined for kw in LOAN_OFFER_KEYWORDS)
+    return _mentions_application_intent(history, ["loan offer", "låneerbjudande"], LOAN_OFFER_KEYWORDS)
 
 
 INDICATION_KEYWORDS = [
@@ -439,7 +460,7 @@ def compute_transition_progress(history: list[dict]) -> dict | None:
         {"label": "Application started", "done": True},
         {"label": "Identity verified", "done": _has_identity_hint(history)},
         {"label": "Documents uploaded", "done": len(_extract_attached_documents(history)) >= documents_needed},
-        {"label": "Decision reached", "done": resolved},
+        {"label": "Request Submitted", "done": resolved},
     ]
     completed = sum(1 for step in steps if step["done"])
     return {"flow": flow_label, "steps": steps, "percent": round(completed / len(steps) * 100)}
@@ -449,10 +470,12 @@ LOAN_PROMISE_SYSTEM_PROMPT = """You are the Mortgage Agent, a specialist that
 Sara (LF Bergslagen's main digital companion) hands a conversation off to once
 a customer wants to apply for a Loan Promise (Lånelöfte) - an income-based
 statement of how much they could likely borrow, used BEFORE they've found a
-specific property, so they're ready to bid once they find one. Introduce
-yourself briefly in your first reply (e.g. "I'm the mortgage specialist Sara
-connected you with") and then run the application process. Reply in the same
-language the customer is writing in, matching Sara's own language rule.
+specific property, so they're ready to bid once they find one. The customer
+only ever sees this as Sara speaking (never a distinct persona introduced or
+handed off to), so continue the conversation in Sara's own voice - no
+self-introduction, no "I'm the specialist X connected you with" framing -
+and just run the application process. Reply in the same language the
+customer is writing in, matching Sara's own language rule.
 
 THE PROCESS, IN ORDER - do not skip or reorder steps:
 

@@ -40,15 +40,24 @@
         <button id="new-chat-btn" class="new-chat-btn" type="button">+ New chat</button>
         <button id="sidebar-hide-btn" class="sidebar-toggle-btn" type="button" title="Hide previous chats">‹</button>
       </div>
-      <div class="chat-search">
-        <input id="chat-search-input" type="text" placeholder="Search previous chats..." autocomplete="off" />
+      <div id="chats-section" class="chats-section">
+        <div class="chats-section-header">
+          <h2 id="chat-list-heading" class="chat-list-heading">Chats</h2>
+          <button id="chats-toggle-btn" class="plan-panel-toggle-btn" type="button" title="Minimize">−</button>
+        </div>
+        <div id="chats-section-body" class="chats-section-body">
+          <div class="chat-search">
+            <input id="chat-search-input" type="text" placeholder="Search previous chats..." autocomplete="off" />
+          </div>
+          <div id="chat-list" class="chat-list"></div>
+        </div>
       </div>
-      <div id="chat-list" class="chat-list"></div>
       <section id="plan-panel" class="plan-panel" aria-live="polite"></section>
 
       <div id="portfolio-panel" class="portfolio-panel" hidden>
         <div class="portfolio-header">
           <span class="portfolio-title" id="portfolio-title">Your activity</span>
+          <button id="portfolio-toggle-btn" class="plan-panel-toggle-btn" type="button" title="Minimize">−</button>
         </div>
         <div id="portfolio-items" class="portfolio-items"></div>
       </div>

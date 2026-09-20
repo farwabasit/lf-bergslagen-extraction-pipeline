@@ -1,16 +1,24 @@
-"""SQLite-backed transition plans. The plan is structured product state, not chat text."""
+"""Transition plans - business logic (task templates, completion-phrase
+matching, next-task recommendation) on top of db.py's plain persistence
+(TransitionPlan/TransitionPlanTask), which lives in the same shared,
+Supabase-capable database as the rest of the app.
 
-import sqlite3
+Plans are keyed primarily by session_id (a plan can start before identity
+verification - see agent.mentions_home_purchase, which triggers plan
+creation from chat text alone). Once that session's customer verifies,
+claim_for_customer stamps customer_id onto the plan so a LATER session for
+the SAME customer resolves to this same plan instead of starting blank -
+see get_for_session's customer_id fallback below."""
+
 import re
 import uuid
-from datetime import date, datetime, timedelta, timezone
-from pathlib import Path
+from datetime import date, timedelta
 
+from . import db
 from .plan_templates import PLAN_TEMPLATES
 
-DB_PATH = Path(__file__).resolve().parent / "data" / "transition_plans.db"
 VALID_STATUSES = {"todo", "in_progress", "done", "needs_human"}
-PHASE_ORDER = {"this_week": 0, "before_move_in": 1, "later": 2}
+PHASE_ORDER = {"this_week": 0, "secure_mortgage": 1, "before_move_in": 2, "later": 3}
 PRIORITY_ORDER = {"high": 0, "medium": 1, "low": 2}
 
 # Only explicit first-person completion statements can update the plan. This
@@ -19,11 +27,13 @@ PRIORITY_ORDER = {"high": 0, "medium": 1, "low": 2}
 COMPLETION_RE = re.compile(
     r"\b(?:i(?:'ve| have)|jag har|vi har)\s+(?:already\s+)?"
     r"(?:done|completed|finished|checked|arranged|set up|chosen|reviewed|understood|built|"
-    r"ordnat|gjort|checkat|valt|gatt igenom|gått igenom|förstått|byggt)\b",
+    r"received|got|signed|ordnat|gjort|checkat|valt|gatt igenom|gått igenom|förstått|byggt|fått|skrivit under)\b",
     re.IGNORECASE,
 )
 TASK_PATTERNS = {
     "mortgage": r"\b(?:mortgage|home loan|bolån)\b",
+    "purchase_agreement": r"\b(?:purchase agreement|köpekontrakt)\b",
+    "loan_offer": r"\b(?:loan offer|bolånelöfte|slutligt lån)\b",
     "home_insurance": r"\b(?:home insurance|hemförsäkring)\b",
     "condominium_add_on": r"(?:condominium\s+(?:insurance\s+)?add[- ]?on|bostadsrättstillägg)",
     "electricity": r"\b(?:electricity|elavtal|elkontrakt)\b",
@@ -36,47 +46,6 @@ TASK_PATTERNS = {
 
 
 class PlanStore:
-    def _connect(self) -> sqlite3.Connection:
-        DB_PATH.parent.mkdir(exist_ok=True)
-        connection = sqlite3.connect(DB_PATH)
-        connection.row_factory = sqlite3.Row
-        return connection
-
-    def __init__(self) -> None:
-        with self._connect() as connection:
-            connection.executescript(
-                """
-                CREATE TABLE IF NOT EXISTS plans (
-                    plan_id TEXT PRIMARY KEY,
-                    session_id TEXT NOT NULL UNIQUE,
-                    event_type TEXT NOT NULL,
-                    event_title TEXT NOT NULL,
-                    key_date TEXT,
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
-                );
-                CREATE TABLE IF NOT EXISTS plan_tasks (
-                    plan_id TEXT NOT NULL,
-                    task_id TEXT NOT NULL,
-                    title TEXT NOT NULL,
-                    description TEXT NOT NULL,
-                    phase TEXT NOT NULL,
-                    priority TEXT NOT NULL,
-                    owner TEXT NOT NULL,
-                    due_offset_days INTEGER NOT NULL,
-                    due_date TEXT,
-                    status TEXT NOT NULL,
-                    updated_at TEXT NOT NULL,
-                    PRIMARY KEY (plan_id, task_id),
-                    FOREIGN KEY (plan_id) REFERENCES plans(plan_id)
-                );
-                """
-            )
-
-    @staticmethod
-    def _now() -> str:
-        return datetime.now(timezone.utc).isoformat()
-
     @staticmethod
     def _due_date(key_date: str | None, offset: int) -> str | None:
         if not key_date:
@@ -84,15 +53,16 @@ class PlanStore:
         return (date.fromisoformat(key_date) + timedelta(days=offset)).isoformat()
 
     def get_for_session(self, session_id: str) -> dict | None:
-        with self._connect() as connection:
-            plan = connection.execute("SELECT * FROM plans WHERE session_id = ?", (session_id,)).fetchone()
-            if not plan:
-                return None
-            tasks = connection.execute(
-                "SELECT task_id, title, description, phase, priority, owner, due_date, status "
-                "FROM plan_tasks WHERE plan_id = ? ORDER BY rowid", (plan["plan_id"],)
-            ).fetchall()
-        return {**dict(plan), "tasks": [dict(task) | {"id": task["task_id"]} for task in tasks]}
+        plan = db.get_transition_plan_by_session(session_id)
+        if plan is not None:
+            return plan
+        # No plan under this exact session yet - if this session's customer
+        # already has a plan from an earlier session, that's the one to show
+        # (see module docstring), not a blank slate.
+        customer_id = db.get_chat_verified_customer(session_id)
+        if not customer_id:
+            return None
+        return db.get_transition_plan_by_customer(customer_id)
 
     def create(self, session_id: str, event_type: str, event_title: str, key_date: str | None) -> dict:
         if event_type not in PLAN_TEMPLATES:
@@ -102,19 +72,24 @@ class PlanStore:
         existing = self.get_for_session(session_id)
         if existing:
             return existing
-        plan_id, now = f"PLAN-{uuid.uuid4().hex[:10].upper()}", self._now()
-        with self._connect() as connection:
-            connection.execute(
-                "INSERT INTO plans VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (plan_id, session_id, event_type, event_title.strip() or "My home purchase", key_date, now, now),
-            )
-            for task in PLAN_TEMPLATES[event_type]:
-                connection.execute(
-                    "INSERT INTO plan_tasks VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (plan_id, task["id"], task["title"], task["description"], task["phase"], task["priority"],
-                     task["owner"], task["due_offset_days"], self._due_date(key_date, task["due_offset_days"]), "todo", now),
-                )
+        plan_id = f"PLAN-{uuid.uuid4().hex[:10].upper()}"
+        tasks = [
+            {**task, "due_date": self._due_date(key_date, task["due_offset_days"])}
+            for task in PLAN_TEMPLATES[event_type]
+        ]
+        db.create_transition_plan(
+            plan_id, session_id, event_type, event_title.strip() or "My home purchase", key_date, tasks,
+        )
         return self.get_for_session(session_id)
+
+    def claim_for_customer(self, session_id: str, customer_id: str) -> None:
+        """Called right when a session's customer verifies (see main.py) -
+        links this session's own plan (if any) to their customer record so
+        a later session finds it. If they already have a plan from an
+        earlier session, this session's own (blank) plan row, if any, is
+        simply left unclaimed - get_for_session's fallback already finds
+        the right one by customer_id."""
+        db.claim_transition_plan_for_customer(session_id, customer_id)
 
     def update_task(self, session_id: str, task_id: str, status: str) -> dict:
         if status not in VALID_STATUSES:
@@ -122,26 +97,13 @@ class PlanStore:
         plan = self.get_for_session(session_id)
         if not plan:
             raise LookupError("No transition plan exists for this session")
-        now = self._now()
-        with self._connect() as connection:
-            updated = connection.execute(
-                "UPDATE plan_tasks SET status = ?, updated_at = ? WHERE plan_id = ? AND task_id = ?",
-                (status, now, plan["plan_id"], task_id),
-            ).rowcount
-            if not updated:
-                raise LookupError("Unknown plan task")
-            connection.execute("UPDATE plans SET updated_at = ? WHERE plan_id = ?", (now, plan["plan_id"]))
+        if not db.update_transition_plan_task(plan["plan_id"], task_id, status):
+            raise LookupError("Unknown plan task")
         return self.get_for_session(session_id)
 
     def delete_for_session(self, session_id: str) -> bool:
         """Delete the plan and its tasks when the customer deletes its chat."""
-        with self._connect() as connection:
-            plan = connection.execute("SELECT plan_id FROM plans WHERE session_id = ?", (session_id,)).fetchone()
-            if not plan:
-                return False
-            connection.execute("DELETE FROM plan_tasks WHERE plan_id = ?", (plan["plan_id"],))
-            connection.execute("DELETE FROM plans WHERE plan_id = ?", (plan["plan_id"],))
-        return True
+        return db.delete_transition_plan_for_session(session_id)
 
     def complete_explicitly_reported_tasks(self, session_id: str | None, message: str) -> list[str]:
         """Mark only clearly completed, named tasks. This is deterministic, not LLM inference."""
@@ -161,17 +123,24 @@ class PlanStore:
         if not matched_ids:
             return []
         open_tasks = {task["id"]: task for task in plan["tasks"] if task["status"] != "done"}
-        completed = [open_tasks[task_id]["title"] for task_id in matched_ids if task_id in open_tasks]
-        if not completed:
+        completed_ids = [task_id for task_id in matched_ids if task_id in open_tasks]
+        if not completed_ids:
             return []
-        now = self._now()
-        with self._connect() as connection:
-            connection.executemany(
-                "UPDATE plan_tasks SET status = 'done', updated_at = ? WHERE plan_id = ? AND task_id = ?",
-                [(now, plan["plan_id"], task_id) for task_id in matched_ids if task_id in open_tasks],
-            )
-            connection.execute("UPDATE plans SET updated_at = ? WHERE plan_id = ?", (now, plan["plan_id"]))
-        return completed
+        completed_titles = [open_tasks[task_id]["title"] for task_id in completed_ids]
+        db.complete_transition_plan_tasks(plan["plan_id"], completed_ids)
+        return completed_titles
+
+    def mark_task_done(self, session_id: str, task_id: str) -> None:
+        """Best-effort auto check-off (e.g. a related case just got created)
+        - a no-op if there's no plan yet or the task's already done, never
+        raises, since this is always incidental to some other action
+        succeeding (see main.py's case-creation handling)."""
+        plan = self.get_for_session(session_id)
+        if not plan:
+            return
+        task = next((t for t in plan["tasks"] if t["id"] == task_id), None)
+        if task and task["status"] != "done":
+            db.update_transition_plan_task(plan["plan_id"], task_id, "done")
 
     @staticmethod
     def _next_task(plan: dict) -> dict | None:
@@ -197,8 +166,8 @@ class PlanStore:
             next_instruction = (
                 f"The next plan task is exactly: {next_task['title']} (phase: {next_task['phase']}, "
                 f"priority: {next_task['priority']}). When the user asks what to do next or requests "
-                f"priorities, recommend this task first. Do not recommend a Later task while any This week "
-                f"or Before move-in task remains incomplete."
+                f"priorities, recommend this task first. Do not recommend a Later task while any First week, "
+                f"Secure mortgage, or Before move-in task remains incomplete."
             )
         return (
             f"Active transition plan: {plan['event_title']}. Key date: {plan['key_date'] or 'not set'}. "

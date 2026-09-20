@@ -14,6 +14,8 @@ class SessionStore:
         return db.get_or_create_chat_session(session_id)
 
     def add_message(self, session_id: str, role: str, content: str, agent_name: str | None = None) -> int:
+        if role == "user":
+            db.set_chat_title_if_unset(session_id, content.split("\n\n[Attached", 1)[0].strip() or "Chat")
         return db.add_chat_message(session_id, role, content, agent_name)
 
     def request_human(self, session_id: str) -> None:

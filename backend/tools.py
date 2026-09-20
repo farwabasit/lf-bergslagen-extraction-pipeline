@@ -360,6 +360,49 @@ def fill_customer_form(extracted_text: str, form_template: dict | None = None) -
     return json.dumps({**template, "fields": populated_fields}, ensure_ascii=False)
 
 
+def submit_insurance_application(history: list[dict], product: str) -> str:
+    """The FORM FILLING flow's actual submission step - called once the
+    customer confirms a form fill_customer_form produced. Creates a REAL
+    cs-service case (visible in the CS Workspace queue, assignable to an
+    advisor) instead of the flow's old behaviour of just narrating "a case
+    officer will review this" with nothing behind it. Uses CaseType.OTHER
+    (cs-service's Java enum has no dedicated type per insurance product -
+    see CaseType.java - so this is the closest real, queueable type rather
+    than inventing one the Java service would reject) with the product name
+    and every filled field recorded in the case's own description/extra, so
+    an advisor opening it sees exactly what was applied for.
+
+    Takes the conversation history, not a form_json argument the model would
+    have to retype from memory (unreliable - an earlier version asked the
+    LLM to pass back fill_customer_form's exact JSON and it routinely came
+    back empty/mangled). Instead this re-derives the fields deterministically
+    by re-running fill_customer_form's own text parsing against the most
+    recent assistant message that displayed the filled form - the same
+    "Label: value" lines it always renders in, so parsing it back is exactly
+    as reliable as parsing an uploaded document was.
+
+    Returns the real case ID - the caller should state it verbatim in its
+    reply so it round-trips through CASE_ID_RE in main.py, the same way
+    every other case-creating flow in this app is picked up."""
+    last_form_text = next(
+        (m.get("content", "") for m in reversed(history) if m.get("role") == "assistant"), ""
+    )
+    try:
+        fields = json.loads(fill_customer_form(last_form_text)).get("fields", [])
+    except (json.JSONDecodeError, TypeError):
+        fields = []
+    values = {f.get("name", ""): f.get("value", "") for f in fields if f.get("value")}
+    full_name = values.get("full_name") or values.get("name") or "Unknown"
+
+    reason = f"{product} application submitted by customer via chat. " + "; ".join(
+        f"{f.get('label', f.get('name', ''))}: {f.get('value', '')}" for f in fields if f.get("value")
+    )
+    case_id, status = cs_client.create_case_with_fallback(
+        "other", full_name, None, reason, {"product": product, **values},
+    )
+    return f"Case created: {case_id} (status: {status})"
+
+
 # Real, live comparison table on LF's car insurance page (Helförsäkring /
 # Halvförsäkring / Trafikförsäkring, feature by feature) - separate from
 # fetch_lf_page above because that function flattens all page text, which
@@ -469,14 +512,16 @@ FREQUENT_TRAVEL_KEYWORDS = [
 
 def compare_home_insurance(history: list[dict]) -> dict:
     """Return LF Bergslagen's home insurance tier comparison (Bas/Mellan/
-    Stor - see HOME_INSURANCE_TIERS) plus a personalized tier recommendation
+    Stor - see HOME_INSURANCE_TIERS) plus a personalized "could be a good
+    fit" pointer (never a directive recommendation - choosing a tier is the
+    customer's own decision, or an LF Bergslagen advisor's to help with)
     when the conversation gives enough signal (buying a condo, working
     remotely, frequent international travel). Deterministic Python, not an
     LLM guess - mirrors the rest of this codebase's rule that any decision
     that actually matters is computed in code, with the LLM only narrating
-    around it. No recommendation is made (recommended_column stays None)
-    when none of the signals are present, rather than defaulting to a tier
-    that doesn't reflect this customer."""
+    around it. No pointer is given (recommended_column stays None) when
+    none of the signals are present, rather than defaulting to a tier that
+    doesn't reflect this customer."""
     combined = " ".join(m.get("content", "") for m in history if m.get("role") == "user").lower()
     is_condo = any(kw in combined for kw in CONDO_KEYWORDS)
     remote_worker = any(kw in combined for kw in REMOTE_WORK_KEYWORDS)
@@ -488,8 +533,9 @@ def compare_home_insurance(history: list[dict]) -> dict:
     if frequent_traveler:
         recommended_column = 2
         recommendation_note = (
-            "Because you travel internationally often, we recommend Stor for the extended "
-            "45-day travel cover, on top of full property and belongings protection. "
+            "Since you travel internationally often, Stor could be a good fit for the extended "
+            "45-day travel cover, on top of full property and belongings protection - though it's "
+            "worth comparing all three yourself, or asking an LF Bergslagen advisor, before deciding."
         )
     elif is_condo or remote_worker:
         recommended_column = 1
@@ -504,9 +550,10 @@ def compare_home_insurance(history: list[dict]) -> dict:
         if is_condo:
             extras.append("the Bostadsrättstillägg add-on")
         recommendation_note = (
-            f"Because {' and '.join(reasons)}, we recommend Mellan for "
-            f"{' plus '.join(extras)}. You likely don't need Stor unless you also travel "
-            "internationally multiple times a year."
+            f"Since {' and '.join(reasons)}, Mellan could be a good fit for "
+            f"{' plus '.join(extras)} - Stor is probably more than you need unless you also travel "
+            "internationally multiple times a year, but it's your call, or an LF Bergslagen advisor "
+            "can help you weigh it."
         )
 
     table = copy.deepcopy(HOME_INSURANCE_TIERS)

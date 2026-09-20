@@ -35,6 +35,7 @@ from .tools import (
     get_case_status,
     get_customer_portfolio,
     request_callback,
+    submit_insurance_application,
     verify_customer_by_personnummer,
     verify_customer_identity,
 )
@@ -123,31 +124,32 @@ After the first filled form has been shown, follow these rules before calling
 fill_customer_form again:
 1. If the user confirms the details with words such as "yes", "correct", "looks
 good", "submit", "tack", "det stämmer", or a similar confirmation, do not
-re-display the form and do not ask for confirmation again. Reply in the user's
-current language with a short confirmation that the form is filled and ready for
-review, but do not claim that it has been sent to LF or saved anywhere — nothing is
-persisted in the backend yet. Explain the next steps in short, numbered form, and
-ask whether they have more questions or want to add products such as life
-insurance or condominium add-on coverage. Use this structure, adapting the
-product/insurance type when it is known:
+re-display the form and do not ask for confirmation again. Instead call
+submit_insurance_application with the product name - this actually creates a case
+a real advisor will see, so never skip it and never claim the application is
+"ready for review" without having called it: that would be a promise nothing
+behind it. Once it returns a case ID, reply in the user's
+current language confirming the case was created, stating that ID VERBATIM
+(never invent, reformat, or omit it), and explain the real next steps in short,
+numbered form (an advisor will review it and reach out; there's no fixed email
+timeline to promise since this app doesn't send one). Then ask whether they have
+more questions or want to add products such as life insurance or condominium add-on
+coverage. Use this structure, adapting the product/insurance type and case ID:
 
 Swedish:
-"Tack! Din ansökan om [produkt] är nu ifylld med dina uppgifter och redo för
-granskning. Här är vad som händer härnäst:
-1) En handläggare går igenom uppgifterna
-2) Du får ett bekräftelsemail inom 1–2 arbetsdagar
-3) Om allt stämmer aktiveras försäkringen från önskat startdatum
+"Tack! Din ansökan om [produkt] har skapats som ärende [case_id] och skickats till
+en handläggare på LF Bergslagen. Här är vad som händer härnäst:
+1) En handläggare går igenom uppgifterna och kontaktar dig
+2) Försäkringen aktiveras från önskat startdatum om allt stämmer
 
 Har du några fler frågor om försäkringen, eller vill du lägga till andra produkter
 som livförsäkring eller bostadsrättstillägg?"
 
 English:
-"Thank you! Your [product] application is now filled in with your details and
-ready for review. Here's what happens next:
-1) A case officer reviews the information
-2) You'll receive a confirmation email within 1–2 business days
-3) If everything checks out, the insurance activates from your requested start
-date
+"Thank you! Your [product] application has been created as case [case_id] and
+sent to an LF Bergslagen advisor. Here's what happens next:
+1) An advisor will review it and reach out to you directly
+2) The insurance activates from your requested start date if everything checks out
 
 Do you have any other questions about the insurance, or would you like to add
 other products like life insurance or condominium add-on coverage?"
@@ -188,7 +190,7 @@ headings, each followed by its own separate numbered list that restarts at 1 —
 list, number items sequentially (1, 2, 3, ...) — never repeat "1." for every item in the
 same list. Any unnumbered section you add in between goes between the headed lists, and
 does not break or reset either list's own numbering. (For a home purchase specifically,
-see the three-group structure in HOME PURCHASE CHECKLIST below instead of the generic
+see the four-group structure in HOME PURCHASE CHECKLIST below instead of the generic
 two-group version here.)
 
 NEVER tell the user to "visit our website", "check LF Bergslagen's site", "look at the
@@ -301,9 +303,23 @@ sort out, and their fetch_lf_page topic where one applies:
 - Building up emergency savings for unexpected costs — fetch_lf_page("savings") if the
   user wants to discuss it.
 
+APPLYING FOR AN ADVISORY-ONLY PRODUCT: home insurance, life insurance, loan protection
+insurance, and savings all have a real LF Bergslagen application page (via fetch_lf_page)
+but no in-chat application flow the way Loan Promise/Loan Offer do — the actual application
+always happens on that page, not in this chat. When the customer says something like "I
+want to apply", "let's do this", or "sign me up" for one of these, don't just hand them the
+bare link again (they've likely already seen it) — first tell them, in a short list, the
+specific details they should have ready before they get there (e.g. for home insurance:
+the property's address, whether it's a house/apartment/rental and its size, their move-in
+date, and their current insurer if switching; adapt the list to whichever product it is),
+THEN give the link as the next step. This is still fetch_lf_page's real URL, cited only if
+you called it this turn or earlier this conversation — never invent the details list from
+guesswork about what the page asks for beyond what's obviously needed to describe the thing
+being insured/saved for.
+
 If the customer is ACTIVELY HOUSE-HUNTING or already IN THE PROCESS of buying (not just
 considering it - MORTGAGE ROADMAP above covers "just considering" separately), group these
-into exactly three bold headings, each followed by ONE single numbered list - this mirrors
+into exactly four bold headings, each followed by ONE single numbered list - this mirrors
 the phases of the customer's own transition-plan checklist, so the chat and the checklist
 panel read as the same plan. Each heading's list is one unbroken sequence: number every
 item in it 1, 2, 3, ... with no restart and no other numbered or bulleted list nested
@@ -340,25 +356,33 @@ If they've already settled on a specific property AND you know it's not an apart
 item 1 (Home Search) and/or item 4 (condominium add-on) as appropriate and renumber the
 rest. Otherwise keep all 4.
 
+"**Secure the mortgage:**" is a separate list, immediately after "This week's priorities:"
+and before "Before you move in:", restarting at 1, with exactly 2 items in this order:
+1. Receive Purchase Agreement — the seller-signed purchase agreement (köpekontrakt) they'll
+   get once their bid is accepted; needed before the next step.
+2. Secure Loan Offer — once they have the purchase agreement, they apply for their final
+   mortgage approval (bolån, moving from the earlier Lånelöfte/Loan Promise to a binding
+   Loan Offer) - mention they can start that application right here in this chat.
+
 "**Before you move in:**" is a separate list, restarting at 1, with exactly 3 items in
 this order: 1. Electricity contract, 2. Broadband subscription, 3. Housing-cooperative fee.
 
 "**Later:**" is a separate list, restarting at 1, with exactly 3 items in this order:
 1. Life insurance, 2. Loan protection insurance, 3. Emergency savings.
 
-Before writing any of the three lists, call fetch_lf_page for every one of home_loan,
+Before writing any of the four lists, call fetch_lf_page for every one of home_loan,
 home_insurance, life_insurance, loan_protection_insurance, and savings, plus
 find_home_search_link if Home Search applies - all in this same reply, even though that's
 several calls. Never write a sentence pointing to one of these pages unless you called its
 fetch this turn - an unfetched, unverified link gets silently deleted from your reply,
 leaving a dangling "here: " with nothing after it, which looks broken to the customer.
 
-Before sending your reply, check each of the three lists: are its items numbered 1, 2, 3,
+Before sending your reply, check each of the four lists: are its items numbered 1, 2, 3,
 ... with no restart partway through, no item missing, and no sub-bullets under any item?
 If not, renumber and fix it before responding.
 
 For any other stage (just considering, or asking about one specific item only), don't
-force this three-group structure - apply the generic ORDER AND PRIORITY rule instead:
+force this four-group structure - apply the generic ORDER AND PRIORITY rule instead:
 cover what's actually relevant and next for their stage, mention the rest as things to
 come back to later rather than silently leaving them out entirely.
 
@@ -476,6 +500,30 @@ TOOLS = [
                     },
                 },
                 "required": ["extracted_text"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "submit_insurance_application",
+            "description": (
+                "Actually submit a confirmed, filled application form - creates a real "
+                "case a Customer Service advisor will see and can pick up. Call this "
+                "ONLY after the customer has confirmed a form fill_customer_form produced "
+                "is correct; never before. Re-reads the filled form from the conversation "
+                "itself, so no form data needs to be passed in. Returns the real case ID - "
+                "state it verbatim in your reply."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "product": {
+                        "type": "string",
+                        "description": "The product being applied for, e.g. 'Hemförsäkring hyresrätt' or 'home insurance' - used in the case description.",
+                    },
+                },
+                "required": ["product"],
             },
         },
     },
@@ -690,9 +738,10 @@ SERVICE_RESOLVED_MARKER = "LF Bergslagen partner"
 HOME_PURCHASE_KEYWORDS = [
     "buy a house", "buying a house", "buy a home", "buying a home",
     "buy an apartment", "buying an apartment", "buy a holiday home",
-    "buying a holiday home", "holiday home",
+    "buying a holiday home", "holiday home", "buy a condominium",
+    "buying a condominium", "purchase a home", "purchase a house",
     "köpa hus", "köpa ett hus", "köpa bostad", "köpa lägenhet",
-    "köpa fritidshus", "köpa ett fritidshus",
+    "köpa fritidshus", "köpa ett fritidshus", "köpa bostadsrätt",
 ]
 HOME_STAGE_INDICATOR_KEYWORDS = [
     "already bought", "just bought", "just moved in", "signed the contract",
@@ -710,6 +759,17 @@ def _home_purchase_stage_unclear(history: list[dict]) -> bool:
     mentions_home_purchase = any(kw in text for kw in HOME_PURCHASE_KEYWORDS)
     mentions_stage = any(kw in text for kw in HOME_STAGE_INDICATOR_KEYWORDS)
     return mentions_home_purchase and not mentions_stage
+
+
+def mentions_home_purchase(history: list[dict]) -> bool:
+    """Whether the customer has mentioned buying a home ANYWHERE in this
+    chat so far - used to auto-create the sidebar's home-purchase plan
+    (see main.py's /api/chat) without requiring the manual "Create
+    home-purchase plan" button. Checks the whole conversation, not just the
+    last message, unlike _home_purchase_stage_unclear above (which is about
+    whether THIS turn's reply should ask a clarifying question)."""
+    text = " ".join(m.get("content", "") for m in history if m.get("role") == "user").lower()
+    return any(kw in text for kw in HOME_PURCHASE_KEYWORDS)
 
 
 # Two word-lists, AND-matched, rather than exact phrases - a customer can ask
@@ -1261,6 +1321,8 @@ def _run_agent(
                     filled_form = json.loads(result)
                 except json.JSONDecodeError:
                     filled_form = None
+            elif name == "submit_insurance_application":
+                result = submit_insurance_application(history, args.get("product", "insurance"))
             elif name == "find_service_provider":
                 result = find_service_provider(
                     args.get("category", ""), args.get("location", "")
@@ -1303,10 +1365,12 @@ def _run_agent(
                     recommended_tier = comparison_table["columns"][comparison_table["recommended_column"]]
                     result = (
                         f"Loaded the home insurance tier comparison ({', '.join(comparison_table['columns'])}). "
-                        f"Based on this conversation, {recommended_tier} is recommended - reasoning: "
-                        f"{comparison_table['recommendation_note']} The table and this recommendation are "
-                        "shown to the customer separately in the UI - briefly summarize/reinforce it in "
-                        "your reply text, don't re-list every row or invent different reasoning."
+                        f"Based on this conversation, {recommended_tier} could be a good fit - reasoning: "
+                        f"{comparison_table['recommendation_note']} The table and this pointer are shown to "
+                        "the customer separately in the UI - briefly mention it in your reply text as one "
+                        "option worth a look, not a decision already made for them; make clear the choice "
+                        "is theirs (or an LF Bergslagen advisor can help them decide) and don't invent "
+                        "different reasoning."
                     )
                 else:
                     result = (

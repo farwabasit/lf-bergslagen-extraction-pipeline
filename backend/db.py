@@ -137,6 +137,11 @@ class ChatSession(Base):
     # the customer to re-verify right at that moment. See main.py's
     # closing-question gate around nba_engine.get_offers_for_customer.
     verified_customer_id = Column(String(32), nullable=True)
+    # Set once, from the first user message in the chat (see
+    # set_chat_title_if_unset) - lets the sidebar list a customer's past
+    # chats by title straight from the server instead of depending on each
+    # browser's own localStorage copy (see list_chat_session_summaries_for_customer).
+    title = Column(String(200), nullable=True)
 
 
 class ChatMessage(Base):
@@ -151,6 +156,70 @@ class ChatMessage(Base):
     content = Column(Text, nullable=False)
     agent_name = Column(String(128), nullable=True)
     ts = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+class Document(Base):
+    """One row per document a customer attaches to the chat - see
+    /api/upload in main.py. Linked to the session it was attached in, to the
+    customer if that session had already verified identity at upload time,
+    and to a case_id once one exists in that same session (see
+    link_session_documents_to_case - documents are always attached before a
+    case is created in every current flow, so this is filled in
+    retroactively rather than known at upload time)."""
+
+    __tablename__ = "documents"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    session_id = Column(String(64), nullable=False, index=True)
+    customer_id = Column(String(32), nullable=True, index=True)
+    case_id = Column(String(32), nullable=True, index=True)
+    filename = Column(String(255), nullable=False)
+    content_type = Column(String(128), nullable=True)
+    extracted_text = Column(Text, nullable=True)
+    uploaded_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+class TransitionPlan(Base):
+    """A customer's life-transition checklist (e.g. home purchase) - see
+    plans.py. Keyed by the session_id it was created in (transition plans
+    can start before identity verification - see agent.mentions_home_purchase),
+    with an optional customer_id stamped in once that session verifies (see
+    plans.claim_for_customer) so the SAME plan is found again from a later,
+    different session for the same customer instead of starting blank."""
+
+    __tablename__ = "transition_plans"
+
+    plan_id = Column(String(24), primary_key=True)
+    session_id = Column(String(64), nullable=False, unique=True, index=True)
+    customer_id = Column(String(32), nullable=True, index=True)
+    event_type = Column(String(32), nullable=False)
+    event_title = Column(String(200), nullable=False)
+    key_date = Column(String(10), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+class TransitionPlanTask(Base):
+    """One checklist task within a TransitionPlan - see plan_templates.py
+    for the fixed task definitions a plan is seeded from."""
+
+    __tablename__ = "transition_plan_tasks"
+
+    plan_id = Column(String(24), ForeignKey("transition_plans.plan_id"), primary_key=True)
+    task_id = Column(String(32), primary_key=True)
+    # Position within plan_templates.py's task list - task_id itself sorts
+    # alphabetically, which scrambled the intended First Week / Secure
+    # Mortgage / etc. sequence (e.g. "condominium_add_on" < "mortgage").
+    sort_order = Column(Integer, nullable=False, default=0)
+    title = Column(String(200), nullable=False)
+    description = Column(Text, nullable=False)
+    phase = Column(String(32), nullable=False)
+    priority = Column(String(16), nullable=False)
+    owner = Column(String(32), nullable=False)
+    due_offset_days = Column(Integer, nullable=False)
+    due_date = Column(String(10), nullable=True)
+    status = Column(String(16), nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
 
 
 def _local_sqlite_url() -> str:
@@ -190,6 +259,14 @@ def init_db() -> None:
         if "verified_customer_id" not in existing_columns:
             with _engine.begin() as conn:
                 conn.execute(text("ALTER TABLE chat_sessions ADD COLUMN verified_customer_id VARCHAR(32)"))
+        if "title" not in existing_columns:
+            with _engine.begin() as conn:
+                conn.execute(text("ALTER TABLE chat_sessions ADD COLUMN title VARCHAR(200)"))
+    if "transition_plan_tasks" in inspector.get_table_names():
+        existing_task_columns = {col["name"] for col in inspector.get_columns("transition_plan_tasks")}
+        if "sort_order" not in existing_task_columns:
+            with _engine.begin() as conn:
+                conn.execute(text("ALTER TABLE transition_plan_tasks ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0"))
 
 
 def _session() -> Session:
@@ -410,6 +487,17 @@ def get_chat_verified_customer(session_id: str) -> str | None:
         return row.verified_customer_id if row else None
 
 
+def set_chat_title_if_unset(session_id: str, title: str) -> None:
+    """Called once, from this chat's first user message (see sessions.py) -
+    a later call is a no-op, same as the client's own title-derivation logic
+    (frontend/app.js's upsertChatListEntry) it mirrors."""
+    with _session() as db:
+        row = _ensure_chat_session(db, session_id)
+        if not row.title:
+            row.title = title[:200]
+            db.commit()
+
+
 def get_chat_messages_after(session_id: str, after: int) -> list[dict]:
     with _session() as db:
         messages = (
@@ -473,6 +561,192 @@ def list_chat_session_summaries() -> list[dict]:
             })
         summaries.sort(key=lambda s: s["last_ts"], reverse=True)
         return summaries
+
+
+def list_chat_session_summaries_for_customer(customer_id: str) -> list[dict]:
+    """Same shape as list_chat_session_summaries, scoped to one customer's
+    verified chats - the sidebar's per-customer "Chats" history (see
+    GET /api/customers/{customer_id}/sessions in main.py), as opposed to
+    list_chat_session_summaries's unfiltered, CS-dashboard-only listing."""
+    with _session() as db:
+        summaries = []
+        rows = db.query(ChatSession).filter(ChatSession.verified_customer_id == customer_id).all()
+        for row in rows:
+            last = (
+                db.query(ChatMessage)
+                .filter(ChatMessage.session_id == row.session_id)
+                .order_by(ChatMessage.id.desc())
+                .first()
+            )
+            if last is None:
+                continue
+            summaries.append({
+                "session_id": row.session_id,
+                "title": row.title or (last.content[:60] if last else "Chat"),
+                "last_message": last.content[:120],
+                "last_ts": last.ts.isoformat(),
+            })
+        summaries.sort(key=lambda s: s["last_ts"], reverse=True)
+        return summaries
+
+
+def count_verified_chat_sessions(customer_id: str) -> int:
+    with _session() as db:
+        return db.query(ChatSession).filter(ChatSession.verified_customer_id == customer_id).count()
+
+
+# --- Documents (see Document above, and /api/upload in main.py) -----------
+
+def save_document(session_id: str, filename: str, content_type: str | None, extracted_text: str) -> int:
+    customer_id = get_chat_verified_customer(session_id)
+    with _session() as db:
+        doc = Document(
+            session_id=session_id, customer_id=customer_id, filename=filename,
+            content_type=content_type, extracted_text=extracted_text,
+        )
+        db.add(doc)
+        db.commit()
+        return doc.id
+
+
+def link_session_documents_to_case(session_id: str, case_id: str) -> None:
+    """Backfills case_id onto this session's documents that don't have one
+    yet - every current flow (Loan Promise/Loan Offer/fraud-dispute) attaches
+    documents BEFORE a case exists, so this is only ever known after the
+    fact, right when /api/chat sees a fresh CASE-###### in the reply."""
+    with _session() as db:
+        db.query(Document).filter(
+            Document.session_id == session_id, Document.case_id.is_(None)
+        ).update({"case_id": case_id})
+        db.commit()
+
+
+# --- Transition plans (see TransitionPlan/TransitionPlanTask above, and
+# plans.py, which owns the business logic - task templates, completion
+# phrase matching - on top of this plain persistence) ----------------------
+
+def _plan_to_dict(row: TransitionPlan, tasks: list[TransitionPlanTask]) -> dict:
+    return {
+        "plan_id": row.plan_id,
+        "session_id": row.session_id,
+        "customer_id": row.customer_id,
+        "event_type": row.event_type,
+        "event_title": row.event_title,
+        "key_date": row.key_date,
+        "tasks": [
+            {
+                "id": t.task_id,
+                "task_id": t.task_id,
+                "title": t.title,
+                "description": t.description,
+                "phase": t.phase,
+                "priority": t.priority,
+                "owner": t.owner,
+                "due_date": t.due_date,
+                "status": t.status,
+            }
+            for t in tasks
+        ],
+    }
+
+
+def get_transition_plan_by_session(session_id: str) -> dict | None:
+    with _session() as db:
+        row = db.query(TransitionPlan).filter(TransitionPlan.session_id == session_id).first()
+        if row is None:
+            return None
+        tasks = (
+            db.query(TransitionPlanTask)
+            .filter(TransitionPlanTask.plan_id == row.plan_id)
+            .order_by(TransitionPlanTask.sort_order)
+            .all()
+        )
+        return _plan_to_dict(row, tasks)
+
+
+def get_transition_plan_by_customer(customer_id: str) -> dict | None:
+    with _session() as db:
+        row = (
+            db.query(TransitionPlan)
+            .filter(TransitionPlan.customer_id == customer_id)
+            .order_by(TransitionPlan.updated_at.desc())
+            .first()
+        )
+        if row is None:
+            return None
+        tasks = (
+            db.query(TransitionPlanTask)
+            .filter(TransitionPlanTask.plan_id == row.plan_id)
+            .order_by(TransitionPlanTask.sort_order)
+            .all()
+        )
+        return _plan_to_dict(row, tasks)
+
+
+def create_transition_plan(
+    plan_id: str, session_id: str, event_type: str, event_title: str,
+    key_date: str | None, tasks: list[dict],
+) -> None:
+    now = datetime.now(timezone.utc)
+    with _session() as db:
+        db.add(TransitionPlan(
+            plan_id=plan_id, session_id=session_id, event_type=event_type,
+            event_title=event_title, key_date=key_date, created_at=now, updated_at=now,
+        ))
+        for index, task in enumerate(tasks):
+            db.add(TransitionPlanTask(
+                plan_id=plan_id, task_id=task["id"], sort_order=index, title=task["title"],
+                description=task["description"], phase=task["phase"], priority=task["priority"],
+                owner=task["owner"], due_offset_days=task["due_offset_days"],
+                due_date=task.get("due_date"), status="todo", updated_at=now,
+            ))
+        db.commit()
+
+
+def update_transition_plan_task(plan_id: str, task_id: str, status: str) -> bool:
+    now = datetime.now(timezone.utc)
+    with _session() as db:
+        updated = (
+            db.query(TransitionPlanTask)
+            .filter(TransitionPlanTask.plan_id == plan_id, TransitionPlanTask.task_id == task_id)
+            .update({"status": status, "updated_at": now})
+        )
+        if updated:
+            db.query(TransitionPlan).filter(TransitionPlan.plan_id == plan_id).update({"updated_at": now})
+        db.commit()
+        return bool(updated)
+
+
+def complete_transition_plan_tasks(plan_id: str, task_ids: list[str]) -> None:
+    now = datetime.now(timezone.utc)
+    with _session() as db:
+        db.query(TransitionPlanTask).filter(
+            TransitionPlanTask.plan_id == plan_id, TransitionPlanTask.task_id.in_(task_ids)
+        ).update({"status": "done", "updated_at": now}, synchronize_session=False)
+        db.query(TransitionPlan).filter(TransitionPlan.plan_id == plan_id).update({"updated_at": now})
+        db.commit()
+
+
+def claim_transition_plan_for_customer(session_id: str, customer_id: str) -> None:
+    """Stamps customer_id onto this session's plan the first time it
+    verifies, so a LATER session for the same customer finds this plan
+    instead of starting a blank one - see plans.claim_for_customer."""
+    with _session() as db:
+        row = db.query(TransitionPlan).filter(TransitionPlan.session_id == session_id).first()
+        if row is not None and row.customer_id is None:
+            row.customer_id = customer_id
+            db.commit()
+
+
+def delete_transition_plan_for_session(session_id: str) -> bool:
+    with _session() as db:
+        row = db.query(TransitionPlan).filter(TransitionPlan.session_id == session_id).first()
+        if row is None:
+            return False
+        db.query(TransitionPlanTask).filter(TransitionPlanTask.plan_id == row.plan_id).delete()
+        db.delete(row)
+        db.commit()
+        return True
 
 
 # --- Contact Rules (Marketing role, see /api/contact-rules in main.py) ----

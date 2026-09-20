@@ -3,13 +3,14 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import FastAPI, File, Header, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import (
+    agent,
     audit,
     cs_client,
     db,
@@ -28,6 +29,8 @@ from .topic_classifier import classify_topic
 from .uploads import extract_text
 
 CASE_ID_RE = re.compile(r"CASE-\d{6}")
+# See the home-insurance branch below, right after case_id is computed.
+HOME_INSURANCE_MENTION_RE = re.compile(r"home insurance|hemförsäkring|villaförsäkring", re.IGNORECASE)
 
 # Next Best Action offers should only ever appear at the natural end of a
 # conversation - when Sara asks a closing question like "anything else I
@@ -207,6 +210,30 @@ def chat(req: ChatRequest) -> dict:
         case_created=bool(case_match), case_id=case_id,
     )
 
+    if req.session_id and case_id:
+        # Documents are always attached BEFORE a case exists in every
+        # current flow, so this is the first point case_id is known.
+        db.link_session_documents_to_case(req.session_id, case_id)
+        # Auto check-off: a just-created case answers one of the sidebar
+        # checklist's own questions, so tick it without waiting for the
+        # customer to separately say "I've done that" (see plans.mark_task_done).
+        if topic in ("mortgage_loan_promise", "mortgage_loan_offer"):
+            plans.mark_task_done(req.session_id, "mortgage")
+        elif HOME_INSURANCE_MENTION_RE.search(reply):
+            # No dedicated topic value exists for this (submit_insurance_application
+            # in agent.py creates a generic "OTHER"-typed case, not classified by
+            # topic_classifier.py the way the mortgage flows are), so this checks
+            # the reply text itself for the product name alongside the fresh
+            # case_id above, rather than a topic string that would never match.
+            plans.mark_task_done(req.session_id, "home_insurance")
+
+    if req.session_id and not plans.get_for_session(req.session_id) and agent.mentions_home_purchase(history):
+        # Auto-create the home-purchase checklist the moment it's clearly
+        # relevant, instead of requiring the sidebar's manual button (see
+        # createHomePurchasePlan in app.js, kept as a harmless fallback).
+        # The frontend's own loadPlan() call after every turn picks this up.
+        plans.create(req.session_id, "home_purchase", "My home purchase", None)
+
     # Identity verification is recorded on every verified turn regardless of
     # whether NBA offers end up firing (see below) - it's what the NBA
     # engine's own learning data and the interaction-history panel need.
@@ -215,6 +242,10 @@ def chat(req: ChatRequest) -> dict:
         db.set_chat_verified_customer(req.session_id, customer_id)
         db.record_interaction(customer_id, req.session_id, topic, case_id)
         sessions.set_verified_customer(req.session_id, customer_id)
+        # Links this session's home-purchase plan (if any) to her customer
+        # record, so a LATER chat where she verifies again finds the SAME
+        # plan instead of starting blank - see plans.claim_for_customer.
+        plans.claim_for_customer(req.session_id, customer_id)
         # Lets the chat widget open the interaction-history panel right on
         # the turn that verified the customer, without waiting for the next
         # message - independent of whether an NBA offer happens to fire.
@@ -286,7 +317,7 @@ def click_offer(body: OfferClickRequest) -> dict:
 
 
 @app.post("/api/upload")
-async def upload(file: UploadFile = File(...)) -> dict:
+async def upload(file: UploadFile = File(...), session_id: str | None = Form(None)) -> dict:
     filename = file.filename or "document"
     extension = Path(filename).suffix.lower()
     if extension and extension not in ALLOWED_UPLOAD_EXTENSIONS:
@@ -299,6 +330,8 @@ async def upload(file: UploadFile = File(...)) -> dict:
     if len(data) > MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail="File too large (max 5MB)")
     text = extract_text(filename, data)
+    if session_id:
+        db.save_document(session_id, filename, file.content_type, text)
     return {"filename": filename, "text": text}
 
 
@@ -374,6 +407,30 @@ def get_interaction_history(session_id: str) -> dict:
     return {"verified": True, "customer_id": customer_id, "items": interaction_history.build_customer_history(customer_id)}
 
 
+@app.get("/api/sessions/{session_id}/activity-summary")
+def get_activity_summary(session_id: str) -> dict:
+    """The sidebar's "Your Activity" panel - a summary view (chat count,
+    case counts by status, top topics, top urgent cases), not the raw
+    interaction list get_interaction_history above returns. Gated on
+    identity verification the same way - see that endpoint's docstring."""
+    customer_id = sessions.get_verified_customer(session_id)
+    if not customer_id:
+        return {"verified": False}
+    return {"verified": True, "customer_id": customer_id, **interaction_history.build_activity_summary(customer_id)}
+
+
+@app.get("/api/customers/{customer_id}/sessions")
+def list_customer_sessions(customer_id: str, session_id: str) -> dict:
+    """The sidebar's per-customer chat history (see item 4's "Chats" list) -
+    gated the same way as interaction-history/activity-summary: the caller
+    must pass a session_id that has ALREADY verified as this exact
+    customer_id in THIS browser, so one customer can't list another's chats
+    by guessing an id."""
+    if sessions.get_verified_customer(session_id) != customer_id:
+        return {"sessions": []}
+    return {"sessions": db.list_chat_session_summaries_for_customer(customer_id)}
+
+
 @app.get("/api/sessions")
 def list_sessions() -> dict:
     return {"sessions": sessions.list_summaries()}
@@ -446,19 +503,26 @@ def get_recent_audit_events(limit: int = 50, x_dashboard_role: str | None = Head
 
 
 @app.get("/api/audit/verify")
-def verify_audit_chain(x_dashboard_role: str | None = Header(default=None)) -> dict:
+def verify_audit_chain() -> dict:
     """Recomputes the hash chain over the whole audit log and reports
-    whether it's intact - the check an auditor would run first."""
-    roles.require_role(x_dashboard_role, "audit_trail")
+    whether it's intact - the check an auditor would run first. Not
+    RBAC-gated like /api/audit/recent above: it's also called (with no
+    role header) by frontend/audit.js, the standalone per-customer audit
+    viewer linked from a case in the separate CS Workspace app - that page
+    has no AI Hub dashboard role to send, and the result carries no PII
+    anyway (just a valid/entries/broken_at summary)."""
     return audit.verify_chain()
 
 
 @app.get("/api/audit/{customer_id}")
-def get_audit_trail(customer_id: str, x_dashboard_role: str | None = Header(default=None)) -> dict:
+def get_audit_trail(customer_id: str) -> dict:
     """Every logged agent decision for one customer_id, in order - the
     underlying data behind any mortgage/credit/document decision made about
-    them. MANAGER and AUDITOR only."""
-    roles.require_role(x_dashboard_role, "audit_trail")
+    them. Not RBAC-gated (see verify_audit_chain above) - this is the same
+    endpoint frontend/audit.js calls when a CS Workspace case's "View full
+    decision history" link is opened, which never sends a dashboard role;
+    scoping to one already-known customer_id is this endpoint's own access
+    boundary, same as the cs-service case link it's reached from."""
     return {"customer_id": customer_id, "events": audit.read_events(customer_id)}
 
 

@@ -15,6 +15,9 @@ let greetingTextEl = document.getElementById("greeting-text");
 const sendBtn = document.getElementById("send-btn");
 const homeBtn = document.getElementById("home-btn");
 const newChatBtn = document.getElementById("new-chat-btn");
+const chatsSectionEl = document.getElementById("chats-section");
+const chatsSectionBodyEl = document.getElementById("chats-section-body");
+const chatsToggleBtn = document.getElementById("chats-toggle-btn");
 const chatListEl = document.getElementById("chat-list");
 const planPanelEl = document.getElementById("plan-panel");
 const chatSearchInputEl = document.getElementById("chat-search-input");
@@ -33,6 +36,24 @@ const PROGRESS_RING_CIRCUMFERENCE = 2 * Math.PI * 28;
 const portfolioPanelEl = document.getElementById("portfolio-panel");
 const portfolioTitleEl = document.getElementById("portfolio-title");
 const portfolioItemsEl = document.getElementById("portfolio-items");
+const portfolioToggleBtn = document.getElementById("portfolio-toggle-btn");
+const chatListHeadingEl = document.getElementById("chat-list-heading");
+
+// Persisted per-browser, same pattern as the plan panel's own collapse
+// state (ltn-plan-collapsed) - see buildPlanPanelShell below.
+let portfolioCollapsed = localStorage.getItem("ltn-portfolio-collapsed") === "1";
+function applyPortfolioCollapsed() {
+  portfolioItemsEl.hidden = portfolioCollapsed;
+  portfolioToggleBtn.textContent = portfolioCollapsed ? "+" : "−";
+  portfolioToggleBtn.title = portfolioCollapsed ? "Expand" : "Minimize";
+  portfolioToggleBtn.setAttribute("aria-expanded", String(!portfolioCollapsed));
+}
+portfolioToggleBtn.addEventListener("click", () => {
+  portfolioCollapsed = !portfolioCollapsed;
+  localStorage.setItem("ltn-portfolio-collapsed", portfolioCollapsed ? "1" : "0");
+  applyPortfolioCollapsed();
+});
+applyPortfolioCollapsed();
 
 // The toggle sets the UI language and is a fallback for ambiguous messages,
 // but the backend still matches whatever language the user actually types
@@ -54,6 +75,7 @@ const I18N = {
     micTitle: "Speak instead of typing",
     sidebarHideTitle: "Hide previous chats",
     sidebarShowTitle: "Show previous chats",
+    chatsHeading: "Chats",
     chatSearchPlaceholder: "Search previous chats...",
     chatSearchEmpty: "No chats match your search.",
     chatGoneNotice: "That chat is no longer available on the server and was removed from this list.",
@@ -71,6 +93,30 @@ const I18N = {
     portfolioEmpty: "Nothing here yet.",
     portfolioUrgent: "Urgent",
     portfolioCompleted: "Completed",
+    activityChats: "Chats with Sara",
+    activityCasesOpen: "Open",
+    activityCasesInProgress: "In progress",
+    activityCasesClosed: "Closed",
+    activityTopTopics: "Top topics",
+    activityTopUrgent: "Most urgent cases",
+    activityNoCases: "No cases yet.",
+    activityNoTopics: "No topics yet.",
+    planEmptyHeading: "My transition plan",
+    planEmptyCopy: "Buying a home? Create a checklist you can update as you go.",
+    planCreateBtn: "Create home-purchase plan",
+    planToggleExpand: "Expand",
+    planToggleMinimize: "Minimize",
+    planProgress: "complete",
+    planKeyDate: "Key date",
+    planDue: "Due",
+    planPriorityHigh: "high priority",
+    planPriorityMedium: "medium priority",
+    planPriorityLow: "low priority",
+    planPhaseThisWeek: "First week",
+    planPhaseSecureMortgage: "Secure mortgage",
+    planPhaseBeforeMoveIn: "Before move-in",
+    planPhaseLater: "Later",
+    planTitleHomePurchase: "My home purchase",
     chips: [
       { label: "Buying a house", text: "I'd like help with buying a house" },
       { label: "Moving in together", text: "My partner and I are moving in together" },
@@ -104,6 +150,7 @@ const I18N = {
     micTitle: "Prata istället för att skriva",
     sidebarHideTitle: "Dölj tidigare chattar",
     sidebarShowTitle: "Visa tidigare chattar",
+    chatsHeading: "Chattar",
     chatSearchPlaceholder: "Sök i tidigare chattar...",
     chatSearchEmpty: "Inga chattar matchar din sökning.",
     chatGoneNotice: "Den chatten finns inte längre på servern och togs bort från listan.",
@@ -121,6 +168,30 @@ const I18N = {
     portfolioEmpty: "Inget här ännu.",
     portfolioUrgent: "Brådskande",
     portfolioCompleted: "Klart",
+    activityChats: "Chattar med Sara",
+    activityCasesOpen: "Öppna",
+    activityCasesInProgress: "Pågående",
+    activityCasesClosed: "Avslutade",
+    activityTopTopics: "Vanligaste ämnen",
+    activityTopUrgent: "Mest brådskande ärenden",
+    activityNoCases: "Inga ärenden ännu.",
+    activityNoTopics: "Inga ämnen ännu.",
+    planEmptyHeading: "Min övergångsplan",
+    planEmptyCopy: "Ska du köpa bostad? Skapa en checklista du kan uppdatera efter hand.",
+    planCreateBtn: "Skapa checklista för bostadsköp",
+    planToggleExpand: "Visa",
+    planToggleMinimize: "Minimera",
+    planProgress: "klara",
+    planKeyDate: "Nyckeldatum",
+    planDue: "Förfaller",
+    planPriorityHigh: "hög prioritet",
+    planPriorityMedium: "medelhög prioritet",
+    planPriorityLow: "låg prioritet",
+    planPhaseThisWeek: "Första veckan",
+    planPhaseSecureMortgage: "Säkra bolånet",
+    planPhaseBeforeMoveIn: "Före inflyttning",
+    planPhaseLater: "Senare",
+    planTitleHomePurchase: "Mitt bostadsköp",
     chips: [
       { label: "Köpa hus", text: "Jag skulle vilja ha hjälp med att köpa hus" },
       { label: "Flytta ihop", text: "Min partner och jag ska flytta ihop" },
@@ -140,7 +211,11 @@ const I18N = {
   },
 };
 
-let currentLang = localStorage.getItem("ltn-lang") || (navigator.language || "").startsWith("sv") ? "sv" : "en";
+// Parenthesized deliberately: `? :` binds looser than `||`, so without the
+// parens this evaluated as (A || B) ? "sv" : "en" - any truthy saved
+// preference (even "en" itself) short-circuited straight to "sv" on every
+// later reload, silently overriding an explicit English choice.
+let currentLang = localStorage.getItem("ltn-lang") || ((navigator.language || "").startsWith("sv") ? "sv" : "en");
 if (!I18N[currentLang]) currentLang = "en";
 
 function t() {
@@ -153,6 +228,8 @@ function applyLanguage(lang) {
   const strings = t();
 
   document.querySelectorAll(".brand-sub").forEach((el) => (el.textContent = strings.brandSub));
+  chatListHeadingEl.textContent = strings.chatsHeading;
+  applyChatsCollapsed();
   greetingLabelEl.textContent = strings.greetingLabel;
   greetingTextEl.textContent = strings.greeting;
   inputEl.placeholder = strings.placeholder;
@@ -166,6 +243,12 @@ function applyLanguage(lang) {
   renderChatList();
   if (!ratingSubmitted) ratingLabelEl.textContent = strings.rateLabel;
   portfolioTitleEl.textContent = strings.portfolioTitle;
+  // Plan/activity panel content is rendered client-side from t() (see
+  // renderPlan/renderActivitySummary), so switching languages needs to
+  // re-render them explicitly - they don't otherwise refresh until the
+  // next chat turn. Both are cheap and no-ops when nothing's loaded yet.
+  loadPlan();
+  refreshPortfolioPanel();
 
   chipsEl.innerHTML = "";
   const dropdown = document.createElement("div");
@@ -215,18 +298,53 @@ let sessionMessageCount = 0; // how many session-store messages we've already ac
 let humanHandoffActive = false; // once true, the composer talks to a human, not the AI
 let lastKnownAgent = null; // name of the CS agent assigned to this session, if any
 let activeForm = null; // control handle for the most recently rendered inline form (see addForm), or null once there's nothing pending to confirm/correct
+// Embedded in the marketing site's widget iframe (site.js sets
+// frameEl.src = "index.html")? sessionStorage is scoped to the OUTER TAB,
+// not to this iframe's own lifetime - it survives across separate visits
+// to the marketing site in the same browser tab, long after any earlier
+// widget conversation should be considered over. A directly-visited
+// standalone page (window === window.top) is the opposite case: reloading
+// THAT page should keep resuming its own conversation (see
+// restoreCurrentSession below), so only the embedded case skips reusing a
+// leftover session id.
+const isEmbeddedWidget = window.self !== window.top;
 let sessionId =
-  sessionStorage.getItem("ltn-session-id") ||
+  (isEmbeddedWidget ? null : sessionStorage.getItem("ltn-session-id")) ||
   (() => {
     const id = crypto.randomUUID();
     sessionStorage.setItem("ltn-session-id", id);
     return id;
   })();
 
-const PLAN_PHASE_LABELS = {
-  this_week: "This week",
-  before_move_in: "Before move-in",
-  later: "Later",
+// The last session_id in THIS browser tab that actually verified identity
+// (see refreshPortfolioPanel). Once set, it's used as a FALLBACK source for
+// the plan/activity/chats panels whenever the currently-viewed chat
+// (sessionId, which can be a completely different, never-verified past
+// chat the customer just clicked open) hasn't itself verified - otherwise
+// switching to any old, unverified chat would hide those panels entirely
+// and make it look like the customer had been logged out, even though
+// she's still the same verified person browsing her own chat history.
+// Cleared only by startNewChat, matching the "verify every new chat" rule.
+let verifiedSessionId = null;
+
+// Phase/title/priority labels are rendered client-side from t() (see I18N
+// above) rather than trusting plan.event_title etc from the server, so the
+// left panel's language always matches the chat language toggle - the
+// server only stores stable, language-neutral identifiers (phase id,
+// event_type, priority id).
+const PLAN_PHASE_KEYS = {
+  this_week: "planPhaseThisWeek",
+  secure_mortgage: "planPhaseSecureMortgage",
+  before_move_in: "planPhaseBeforeMoveIn",
+  later: "planPhaseLater",
+};
+const PLAN_TITLE_KEYS = {
+  home_purchase: "planTitleHomePurchase",
+};
+const PLAN_PRIORITY_KEYS = {
+  high: "planPriorityHigh",
+  medium: "planPriorityMedium",
+  low: "planPriorityLow",
 };
 
 // Persisted per-browser so the panel stays collapsed/expanded across the
@@ -255,7 +373,7 @@ function buildPlanPanelShell(titleText) {
   toggleBtn.type = "button";
   toggleBtn.className = "plan-panel-toggle-btn";
   toggleBtn.setAttribute("aria-expanded", String(!planPanelCollapsed));
-  toggleBtn.title = planPanelCollapsed ? "Expand" : "Minimize";
+  toggleBtn.title = planPanelCollapsed ? t().planToggleExpand : t().planToggleMinimize;
   toggleBtn.textContent = planPanelCollapsed ? "+" : "−";
 
   const body = document.createElement("div");
@@ -267,7 +385,7 @@ function buildPlanPanelShell(titleText) {
     localStorage.setItem("ltn-plan-collapsed", planPanelCollapsed ? "1" : "0");
     body.hidden = planPanelCollapsed;
     toggleBtn.textContent = planPanelCollapsed ? "+" : "−";
-    toggleBtn.title = planPanelCollapsed ? "Expand" : "Minimize";
+    toggleBtn.title = planPanelCollapsed ? t().planToggleExpand : t().planToggleMinimize;
     toggleBtn.setAttribute("aria-expanded", String(!planPanelCollapsed));
   });
 
@@ -278,39 +396,41 @@ function buildPlanPanelShell(titleText) {
 
 function renderEmptyPlan() {
   clearPlanPanel();
-  const body = buildPlanPanelShell("My transition plan");
+  const body = buildPlanPanelShell(t().planEmptyHeading);
   const copy = document.createElement("p");
   copy.className = "plan-empty-copy";
-  copy.textContent = "Buying a home? Create a checklist you can update as you go.";
+  copy.textContent = t().planEmptyCopy;
   const button = document.createElement("button");
   button.className = "plan-create-btn";
   button.type = "button";
-  button.textContent = "Create home-purchase plan";
+  button.textContent = t().planCreateBtn;
   button.addEventListener("click", createHomePurchasePlan);
   body.append(copy, button);
 }
 
 function renderPlan(plan) {
   clearPlanPanel();
-  const body = buildPlanPanelShell(plan.event_title);
+  const strings = t();
+  const title = PLAN_TITLE_KEYS[plan.event_type] ? strings[PLAN_TITLE_KEYS[plan.event_type]] : plan.event_title;
+  const body = buildPlanPanelShell(title);
   const completed = plan.tasks.filter((task) => task.status === "done").length;
   const progress = document.createElement("p");
   progress.className = "plan-progress";
-  progress.textContent = `${completed} / ${plan.tasks.length} complete`;
+  progress.textContent = `${completed} / ${plan.tasks.length} ${strings.planProgress}`;
   body.append(progress);
   if (plan.key_date) {
     const date = document.createElement("p");
     date.className = "plan-date";
-    date.textContent = `Key date: ${plan.key_date}`;
+    date.textContent = `${strings.planKeyDate}: ${plan.key_date}`;
     body.appendChild(date);
   }
 
-  for (const phase of ["this_week", "before_move_in", "later"]) {
+  for (const phase of ["this_week", "secure_mortgage", "before_move_in", "later"]) {
     const tasks = plan.tasks.filter((task) => task.phase === phase);
     if (!tasks.length) continue;
     const phaseHeading = document.createElement("h3");
     phaseHeading.className = "plan-phase";
-    phaseHeading.textContent = PLAN_PHASE_LABELS[phase];
+    phaseHeading.textContent = strings[PLAN_PHASE_KEYS[phase]];
     body.appendChild(phaseHeading);
     tasks.forEach((task) => {
       const row = document.createElement("div");
@@ -329,7 +449,9 @@ function renderPlan(plan) {
       title.textContent = task.title;
       const meta = document.createElement("span");
       meta.className = "plan-task-meta";
-      meta.textContent = task.due_date ? `Due ${task.due_date}` : task.priority + " priority";
+      meta.textContent = task.due_date
+        ? `${strings.planDue} ${task.due_date}`
+        : strings[PLAN_PRIORITY_KEYS[task.priority]] || task.priority;
       label.append(title, meta);
       row.append(checkbox, label);
       body.appendChild(row);
@@ -337,15 +459,38 @@ function renderPlan(plan) {
   }
 }
 
+async function fetchPlanFor(forSessionId) {
+  const res = await fetch(`/api/plans/session/${forSessionId}`);
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`Plan request failed: ${res.status}`);
+  return res.json();
+}
+
 async function loadPlan() {
+  const requestedSessionId = sessionId;
   try {
-    const res = await fetch(`/api/plans/session/${sessionId}`);
-    if (res.status === 404) {
+    let plan = await fetchPlanFor(requestedSessionId);
+    // The user can switch/start a chat while this request is in flight (e.g.
+    // clicking "+ New chat" right after sending a message) - a late response
+    // for the OLD session must never clobber the panel now showing a
+    // DIFFERENT session, so it's discarded rather than rendered.
+    if (sessionId !== requestedSessionId) return;
+
+    // This exact chat has no plan of its own - if an EARLIER chat in this
+    // browser tab verified identity, fall back to that customer's plan
+    // instead of showing empty, so browsing a different (possibly
+    // never-verified) past chat doesn't make her home-purchase progress
+    // disappear (see verifiedSessionId above).
+    if (!plan && verifiedSessionId && verifiedSessionId !== requestedSessionId) {
+      plan = await fetchPlanFor(verifiedSessionId);
+      if (sessionId !== requestedSessionId) return;
+    }
+
+    if (!plan) {
       renderEmptyPlan();
       return;
     }
-    if (!res.ok) throw new Error(`Plan request failed: ${res.status}`);
-    renderPlan(await res.json());
+    renderPlan(plan);
   } catch (err) {
     console.error(err);
   }
@@ -360,7 +505,6 @@ async function createHomePurchasePlan() {
     });
     if (!res.ok) throw new Error(`Plan creation failed: ${res.status}`);
     renderPlan(await res.json());
-    addBubble("system-note", "Your home-purchase plan is ready. Tell Sara your move-in date when you know it.");
   } catch (err) {
     console.error(err);
   }
@@ -837,80 +981,150 @@ function addFormSaveError() {
   messagesEl.scrollTop = messagesEl.scrollHeight;
 }
 
-// --- Interaction-history panel (left sidebar) ---
+// --- "Your Activity" panel (left sidebar) ---
 //
 // Shown once this browser session has verified a customer's identity (see
 // verify_customer_identity in backend/tools.py). Backed by
-// GET /api/sessions/{sessionId}/interaction-history, which only returns
-// data if the SERVER remembers this session_id as verified - the panel
-// never sends or trusts a customer_id itself, so switching to a chat that
-// was never verified in this browser just hides the panel instead of
-// showing someone else's history.
-function formatPortfolioDate(iso) {
-  if (!iso) return "";
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleDateString(currentLang === "sv" ? "sv-SE" : "en-US", {
-    month: "short",
-    day: "numeric",
-  });
-}
+// GET /api/sessions/{sessionId}/activity-summary, which only returns data
+// if the SERVER remembers this session_id as verified - the panel never
+// sends or trusts a customer_id itself, so switching to a chat that was
+// never verified in this browser just hides the panel instead of showing
+// someone else's activity.
 
-function renderPortfolio(items) {
+// Renders the "Your Activity" summary: chat count, case counts by status,
+// top topics, top urgent cases - NOT the raw interaction-by-interaction
+// list this panel used to show (see build_activity_summary in
+// backend/interaction_history.py).
+function renderActivitySummary(summary) {
   portfolioItemsEl.innerHTML = "";
+  const strings = t();
 
-  if (!items || !items.length) {
+  const chatsRow = document.createElement("div");
+  chatsRow.className = "activity-stat-row";
+  chatsRow.innerHTML = `<span class="activity-stat-label">${escapeHtml(strings.activityChats)}</span><span class="activity-stat-value">${summary.total_chats}</span>`;
+  portfolioItemsEl.appendChild(chatsRow);
+
+  const cases = summary.cases || { open: 0, in_progress: 0, closed: 0 };
+  const casesSection = document.createElement("div");
+  casesSection.className = "activity-section";
+  casesSection.innerHTML = `
+    <div class="activity-stat-row"><span class="activity-stat-label">${escapeHtml(strings.activityCasesOpen)}</span><span class="activity-stat-value">${cases.open}</span></div>
+    <div class="activity-stat-row"><span class="activity-stat-label">${escapeHtml(strings.activityCasesInProgress)}</span><span class="activity-stat-value">${cases.in_progress}</span></div>
+    <div class="activity-stat-row"><span class="activity-stat-label">${escapeHtml(strings.activityCasesClosed)}</span><span class="activity-stat-value">${cases.closed}</span></div>
+  `;
+  portfolioItemsEl.appendChild(casesSection);
+
+  const topicsSection = document.createElement("div");
+  topicsSection.className = "activity-section";
+  const topicsHeading = document.createElement("div");
+  topicsHeading.className = "activity-section-heading";
+  topicsHeading.textContent = strings.activityTopTopics;
+  topicsSection.appendChild(topicsHeading);
+  if (summary.top_topics && summary.top_topics.length) {
+    for (const topic of summary.top_topics) {
+      const row = document.createElement("div");
+      row.className = "activity-list-row";
+      row.textContent = topic;
+      topicsSection.appendChild(row);
+    }
+  } else {
     const empty = document.createElement("div");
     empty.className = "portfolio-empty";
-    empty.textContent = t().portfolioEmpty;
-    portfolioItemsEl.appendChild(empty);
-    return;
+    empty.textContent = strings.activityNoTopics;
+    topicsSection.appendChild(empty);
   }
+  portfolioItemsEl.appendChild(topicsSection);
 
-  for (const item of items) {
-    const card = document.createElement("div");
-    card.className = "portfolio-item" + (item.priority === "high" ? " priority-high" : "");
-
-    let badgeHtml = "";
-    if (item.priority === "high") {
-      badgeHtml = `<span class="portfolio-badge status-high">${escapeHtml(t().portfolioUrgent)}</span>`;
-    } else if (item.priority === "done") {
-      badgeHtml = `<span class="portfolio-badge status-done">${escapeHtml(t().portfolioCompleted)}</span>`;
-    } else if (item.priority === "open" && item.status_label) {
-      badgeHtml = `<span class="portfolio-badge status-open">${escapeHtml(item.status_label)}</span>`;
+  const urgentSection = document.createElement("div");
+  urgentSection.className = "activity-section";
+  const urgentHeading = document.createElement("div");
+  urgentHeading.className = "activity-section-heading";
+  urgentHeading.textContent = strings.activityTopUrgent;
+  urgentSection.appendChild(urgentHeading);
+  if (summary.top_urgent_cases && summary.top_urgent_cases.length) {
+    for (const item of summary.top_urgent_cases) {
+      const row = document.createElement("div");
+      row.className = "activity-list-row";
+      row.innerHTML = `${escapeHtml(item.label)}${item.status_label ? ` <span class="portfolio-case-id">${escapeHtml(item.status_label)}</span>` : ""}`;
+      urgentSection.appendChild(row);
     }
-
-    card.innerHTML = `
-      <div class="portfolio-item-top">
-        <span class="portfolio-item-label" title="${escapeHtml(item.label)}">${escapeHtml(item.label)}</span>
-        <span class="portfolio-item-date">${escapeHtml(formatPortfolioDate(item.date))}</span>
-      </div>
-      <div class="portfolio-item-meta">
-        ${badgeHtml}
-        ${item.case_id ? `<span class="portfolio-case-id">${escapeHtml(item.case_id)}</span>` : ""}
-      </div>
-    `;
-    portfolioItemsEl.appendChild(card);
+  } else {
+    const empty = document.createElement("div");
+    empty.className = "portfolio-empty";
+    empty.textContent = strings.activityNoCases;
+    urgentSection.appendChild(empty);
   }
+  portfolioItemsEl.appendChild(urgentSection);
+}
+
+// The "Chats" list (sidebar history) and "My Home Purchase" plan panel are
+// both per-browser/per-conversation content that's meaningless to show to a
+// visitor who hasn't verified their identity in THIS chat yet - the plan
+// can be auto-created from chat text alone with no identity check (see
+// agent.mentions_home_purchase), but the persisted, cross-chat CHECKLIST
+// view of it is gated the same way "Your Activity" already is: hidden by
+// default, revealed only once this session's customer has verified.
+function setAuthenticatedSidebarVisible(visible) {
+  chatsSectionEl.hidden = !visible;
+  planPanelEl.hidden = !visible;
+}
+
+// Collapse/expand for the "Chats" section - same persisted-per-browser
+// pattern as the plan panel's own toggle (ltn-plan-collapsed) and the
+// portfolio panel's (ltn-portfolio-collapsed).
+let chatsCollapsed = localStorage.getItem("ltn-chats-collapsed") === "1";
+function applyChatsCollapsed() {
+  chatsSectionBodyEl.hidden = chatsCollapsed;
+  chatsToggleBtn.textContent = chatsCollapsed ? "+" : "−";
+  chatsToggleBtn.title = chatsCollapsed ? t().planToggleExpand : t().planToggleMinimize;
+  chatsToggleBtn.setAttribute("aria-expanded", String(!chatsCollapsed));
+}
+chatsToggleBtn.addEventListener("click", () => {
+  chatsCollapsed = !chatsCollapsed;
+  localStorage.setItem("ltn-chats-collapsed", chatsCollapsed ? "1" : "0");
+  applyChatsCollapsed();
+});
+applyChatsCollapsed();
+
+async function fetchActivityFor(forSessionId) {
+  const res = await fetch(`/api/sessions/${forSessionId}/activity-summary`);
+  if (!res.ok) return { verified: false };
+  return res.json();
 }
 
 async function refreshPortfolioPanel() {
+  const requestedSessionId = sessionId;
   try {
-    const res = await fetch(`/api/sessions/${sessionId}/interaction-history`);
-    if (!res.ok) {
-      portfolioPanelEl.hidden = true;
-      return;
+    let data = await fetchActivityFor(requestedSessionId);
+    if (sessionId !== requestedSessionId) return; // see loadPlan's same guard
+    let sourceSessionId = requestedSessionId;
+
+    // This exact chat never verified - fall back to whichever session in
+    // this browser tab DID, same reasoning as loadPlan's fallback above,
+    // so the Chats/Activity/Plan panels stay up the whole time she's
+    // browsing her own chat history, not just in the one chat where she
+    // happened to verify.
+    if (!data.verified && verifiedSessionId && verifiedSessionId !== requestedSessionId) {
+      data = await fetchActivityFor(verifiedSessionId);
+      if (sessionId !== requestedSessionId) return;
+      sourceSessionId = verifiedSessionId;
     }
-    const data = await res.json();
+
     if (!data.verified) {
+      verifiedSessionId = null;
       portfolioPanelEl.hidden = true;
+      setAuthenticatedSidebarVisible(false);
       return;
     }
+    verifiedSessionId = sourceSessionId;
     portfolioPanelEl.hidden = false;
-    renderPortfolio(data.items);
+    setAuthenticatedSidebarVisible(true);
+    renderActivitySummary(data);
+    mergeCustomerChatHistory(data.customer_id);
   } catch (err) {
     console.error(err);
     portfolioPanelEl.hidden = true;
+    setAuthenticatedSidebarVisible(false);
   }
 }
 
@@ -1340,13 +1554,15 @@ function renderBooleanComparisonTable(wrapper, table) {
 }
 
 // --- Home insurance tier comparison (Bas/Mellan/Stor) - text-per-cell
-// rather than checkmarks, an optional "Sara recommended for you" badge
-// above whichever column compare_home_insurance (backend) decided fits this
-// conversation, a footnote explaining why, and a client-side Single/
-// Co-living toggle that swaps the price row using values already present in
-// the response (no extra round-trip needed). See compare_home_insurance in
-// backend/tools.py for where recommended_column/recommendation_note and the
-// price row's co_living_values come from. ---
+// rather than checkmarks, an optional "Could be a good fit" badge above
+// whichever column compare_home_insurance (backend) flagged as matching
+// signals in this conversation - deliberately not phrased as Sara making
+// the choice for the customer (see that function's docstring) - a footnote
+// explaining why, and a client-side Single/Co-living toggle that swaps the
+// price row using values already present in the response (no extra
+// round-trip needed). See compare_home_insurance in backend/tools.py for
+// where recommended_column/recommendation_note and the price row's
+// co_living_values come from. ---
 function renderTierComparisonTable(wrapper, table) {
   const recommendedIndex = table.recommended_column;
   const priceRowIndex = table.rows.findIndex((row) => row.co_living_values);
@@ -1367,7 +1583,7 @@ function renderTierComparisonTable(wrapper, table) {
     table.columns.forEach((_, i) => {
       const cell = document.createElement("span");
       cell.className = "tier-badge-cell";
-      if (i === recommendedIndex) cell.innerHTML = `<span class="tier-badge">✨ Sara recommended for you</span>`;
+      if (i === recommendedIndex) cell.innerHTML = `<span class="tier-badge">✨ Could be a good fit for you</span>`;
       badgeRow.appendChild(cell);
     });
     wrapper.appendChild(badgeRow);
@@ -1692,6 +1908,7 @@ async function uploadFiles(files) {
     renderAttachmentPreview(`Uploading ${index + 1} of ${files.length}...`);
     const formData = new FormData();
     formData.append("file", file);
+    formData.append("session_id", sessionId);
     const res = await fetch("/api/upload", { method: "POST", body: formData });
     if (!res.ok) throw new Error(`Upload failed with ${res.status}`);
     const upload = await res.json();
@@ -2001,6 +2218,48 @@ function upsertChatListEntry() {
   renderChatList();
 }
 
+// Once this browser's current session verifies as a customer, pull the
+// REST of her chat history from the server (other chats, possibly from a
+// different browser/device) and merge it into this browser's own
+// localStorage list - see GET /api/customers/{customer_id}/sessions in
+// main.py. Local-only entries (not yet verified in any session) are left
+// untouched; this only ever adds server-known chats it doesn't have yet.
+async function mergeCustomerChatHistory(customerId) {
+  if (!customerId) return;
+  const requestedSessionId = sessionId;
+  // Always the session that actually verified (see refreshPortfolioPanel,
+  // which sets this right before calling here) - the CURRENTLY viewed chat
+  // (sessionId) may be a different, never-verified one, which this
+  // customer-scoped endpoint would otherwise correctly refuse.
+  const authSessionId = verifiedSessionId || requestedSessionId;
+  try {
+    const res = await fetch(`/api/customers/${customerId}/sessions?session_id=${encodeURIComponent(authSessionId)}`);
+    if (sessionId !== requestedSessionId) return; // see loadPlan's same guard
+    if (!res.ok) return;
+    const data = await res.json();
+    if (sessionId !== requestedSessionId) return;
+    const local = loadChatList();
+    const localIds = new Set(local.map((chat) => chat.id));
+    let changed = false;
+    for (const remote of data.sessions || []) {
+      if (localIds.has(remote.session_id)) continue;
+      local.push({
+        id: remote.session_id,
+        title: remote.title || "Chat",
+        ts: Date.parse(remote.last_ts) || Date.now(),
+        searchText: "",
+      });
+      changed = true;
+    }
+    if (changed) {
+      saveChatList(local);
+      renderChatList();
+    }
+  } catch (err) {
+    console.error(err);
+  }
+}
+
 function renderChatList() {
   const query = (chatSearchInputEl.value || "").trim().toLowerCase();
   const list = loadChatList().sort((a, b) => b.ts - a.ts);
@@ -2111,11 +2370,17 @@ function startNewChat() {
   lastKnownAgent = null;
   sessionId = crypto.randomUUID();
   sessionStorage.setItem("ltn-session-id", sessionId);
+  // Must happen before resetChatView (which triggers loadPlan/
+  // refreshPortfolioPanel via applyLanguage) - otherwise those calls would
+  // fall back to the just-abandoned chat's verified session and show her
+  // plan/activity in this brand new, not-yet-verified chat.
+  verifiedSessionId = null;
   resetChatView();
   chatSearchInputEl.value = "";
   renderEmptyPlan();
   renderChatList();
   portfolioPanelEl.hidden = true;
+  setAuthenticatedSidebarVisible(false);
 }
 
 function parseUserMessageContent(content) {
@@ -2139,25 +2404,13 @@ function parseUserMessageContent(content) {
   };
 }
 
-async function loadChat(id) {
-  if (id === sessionId) return;
-  if (speechSupported) window.speechSynthesis.cancel();
-  try {
-    const res = await fetch(`/api/sessions/${id}`);
-    if (!res.ok) {
-      // The server no longer knows this chat (e.g. it predates this
-      // browser's chat history being made durable server-side) - drop it
-      // from the sidebar instead of leaving a dead entry that does nothing
-      // when clicked.
-      if (res.status === 404) {
-        saveChatList(loadChatList().filter((c) => c.id !== id));
-        renderChatList();
-        showToast(t().chatGoneNotice);
-      }
-      return;
-    }
-    const data = await res.json();
-
+// Renders a fetched session's transcript, and refreshes everything derived
+// from it (plan, activity, chat list) - shared by loadChat (explicit
+// navigation to a past chat) and restoreCurrentSession (re-opening this
+// browser tab's own persisted session_id on page load), so both end up
+// with a consistent view instead of the plan/activity panels quietly
+// reflecting a session whose transcript was never actually rendered.
+async function applySessionData(id, data) {
     sessionId = id;
     sessionStorage.setItem("ltn-session-id", sessionId);
     sessionMessageCount = data.messages.length;
@@ -2210,9 +2463,55 @@ async function loadChat(id) {
     await loadPlan();
     renderChatList();
     refreshPortfolioPanel();
+}
+
+async function loadChat(id) {
+  if (id === sessionId) return;
+  if (speechSupported) window.speechSynthesis.cancel();
+  try {
+    const res = await fetch(`/api/sessions/${id}`);
+    if (!res.ok) {
+      // The server no longer knows this chat (e.g. it predates this
+      // browser's chat history being made durable server-side) - drop it
+      // from the sidebar instead of leaving a dead entry that does nothing
+      // when clicked.
+      if (res.status === 404) {
+        saveChatList(loadChatList().filter((c) => c.id !== id));
+        renderChatList();
+        showToast(t().chatGoneNotice);
+      }
+      return;
+    }
+    const data = await res.json();
+    await applySessionData(id, data);
   } catch (err) {
     console.error(err);
   }
+}
+
+// Re-opens THIS browser tab's own persisted session_id on page load, if the
+// server actually has a transcript for it - otherwise the plan/activity
+// panels and the background poll (which drives the progress ring) would
+// silently reflect that old session's state while the visible chat area
+// still showed nothing but the default greeting. A 404 here (brand new
+// tab, session_id never sent a message yet) is normal, not an error - it
+// falls through to the same empty-state loadPlan/refreshPortfolioPanel
+// calls a fresh chat gets.
+async function restoreCurrentSession() {
+  try {
+    const res = await fetch(`/api/sessions/${sessionId}`);
+    if (res.ok) {
+      const data = await res.json();
+      if (data.messages.length) {
+        await applySessionData(sessionId, data);
+        return;
+      }
+    }
+  } catch (err) {
+    console.error(err);
+  }
+  loadPlan();
+  refreshPortfolioPanel();
 }
 
 // --- Embeddable widget integration: lets a parent marketing page (see
@@ -2251,7 +2550,7 @@ sidebarHideBtn.addEventListener("click", () => setSidebarCollapsed(true));
 sidebarShowBtn.addEventListener("click", () => setSidebarCollapsed(false));
 setSidebarCollapsed(localStorage.getItem("ltn-sidebar-collapsed") === "1");
 
+setAuthenticatedSidebarVisible(false);
 applyLanguage(currentLang);
 renderChatList();
-loadPlan();
-refreshPortfolioPanel();
+restoreCurrentSession();

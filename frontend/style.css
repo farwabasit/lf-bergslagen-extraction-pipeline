@@ -190,12 +190,47 @@ body.sidebar-collapsed #sidebar-show-btn {
   background: var(--lf-blue-dark);
 }
 
+/* Wraps the heading/search/list so the whole "Chats" section can collapse
+   as one unit (see #chats-toggle-btn in app.js) - it, not .chat-list
+   directly, is the sidebar's flex item now, so it passes sizing through to
+   its own children via display:flex the same way. */
+.chats-section {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 32px;
+}
+
+.chats-section-header {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.chats-section-body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.chat-list-heading {
+  color: var(--text-muted);
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  margin: 0;
+  text-transform: uppercase;
+}
+
 .chat-list {
   display: flex;
-  flex: 1;
+  flex: 1 1 auto;
   flex-direction: column;
   gap: 2px;
-  min-height: 0;
+  min-height: 120px;
   overflow-y: auto;
 }
 
@@ -278,6 +313,9 @@ body.sidebar-collapsed #sidebar-show-btn {
   border-top: 1px solid var(--border);
   margin-top: 14px;
   padding-top: 14px;
+  flex: 0 1 auto;
+  max-height: 38vh;
+  overflow-y: auto;
 }
 
 .plan-panel-header {
@@ -309,12 +347,56 @@ body.sidebar-collapsed #sidebar-show-btn {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  flex: 0 1 auto;
+  max-height: 38vh;
+  overflow-y: auto;
 }
 
 .portfolio-header {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
+  gap: 8px;
+}
+
+.activity-stat-row {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  font-size: 12.5px;
+}
+
+.activity-stat-label {
+  color: var(--text-main);
+}
+
+.activity-stat-value {
+  color: var(--lf-blue-dark);
+  font-weight: 700;
+}
+
+.activity-section {
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.activity-section-heading {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.activity-list-row {
+  color: var(--text-main);
+  font-size: 12.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .portfolio-title {
@@ -1924,10 +2006,14 @@ body.widget-compact #sidebar-show-btn {
   .chat-search {
     display: none;
   }
+  .chat-list-heading {
+    display: none;
+  }
   .chat-item {
     font-size: 11px;
   }
-  .plan-panel {
+  .plan-panel,
+  .portfolio-panel {
     display: none;
   }
 }
