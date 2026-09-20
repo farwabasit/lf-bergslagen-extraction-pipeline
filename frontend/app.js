@@ -62,6 +62,7 @@ const I18N = {
     supportLabel: "LF Bergslagen · Support",
     aiLabel: "Sara · Digital Companion",
     thinking: "Thinking...",
+    authComplete: "Authentication Complete",
     uploadError: "Couldn't read one of those files. Try files under 5MB each.",
     chatError: "Something went wrong reaching the navigator. Please try again.",
     speechLang: "en-US",
@@ -125,6 +126,7 @@ const I18N = {
     supportLabel: "LF Bergslagen · Support",
     aiLabel: "Sara · Digital följeslagare",
     thinking: "Tänker...",
+    authComplete: "Autentisering slutförd",
     uploadError: "Kunde inte läsa en av filerna. Prova filer under 5 MB styck.",
     chatError: "Något gick fel. Försök igen.",
     speechLang: "sv-SE",
@@ -685,6 +687,21 @@ function addBubble(role, text, { markdown = false, label = "", speakable = false
   messagesEl.scrollTop = messagesEl.scrollHeight;
   return div;
 }
+
+// Small muted status bubble styled like the auth card above it. Inserted
+// before `before` when given, otherwise appended.
+function addStatusMessage(text, before = null) {
+  const div = document.createElement("div");
+  div.className = "chat-status-message";
+  div.textContent = text;
+  messagesEl.insertBefore(div, before);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+// Set by the auth card's Continue click; consumed by the next
+// getAssistantReply so "Authentication Complete" shows once per chat session.
+let authStatusPending = false;
+const authStatusShownFor = new Set();
 
 // Which family a file belongs to, used both to pick an icon and to decide
 // how (or whether) the browser can actually render the original file.
@@ -1277,7 +1294,7 @@ function addForm(form) {
     submitBtn.remove();
   }
 
-  async function saveForm() {
+  async function saveForm(caseId) {
     if (formSaved) return;
     formSaved = true;
     try {
@@ -1287,6 +1304,7 @@ function addForm(form) {
         body: JSON.stringify({
           session_id: sessionId,
           title: form.title || "Insurance application",
+          case_id: caseId,
           fields: form.fields.map((f) => ({
             name: f.name,
             label: f.label,
@@ -1328,11 +1346,11 @@ function addForm(form) {
     get submitted() {
       return formSubmitted;
     },
-    markSubmitted() {
+    markSubmitted(caseId) {
       if (formSubmitted) return;
       formSubmitted = true;
       renderSummary();
-      saveForm();
+      saveForm(caseId);
     },
     markEditable() {
       if (!formSubmitted) return;
@@ -1414,6 +1432,7 @@ function addAuthChoice(form) {
     continueBtn.disabled = true;
     wrapper.classList.add("auth-choice-submitted");
     const chosen = form.options.find((option) => option.value === selected);
+    authStatusPending = !authStatusShownFor.has(sessionId);
     sendMessage(chosen ? chosen.message : selected);
   });
   wrapper.appendChild(continueBtn);
@@ -1491,29 +1510,17 @@ function renderTierComparisonTable(wrapper, table) {
     wrapper.appendChild(toggle);
   }
 
-  if (recommendedIndex != null) {
-    const badgeRow = document.createElement("div");
-    badgeRow.className = "tier-badge-row";
-    // Leading spacer matching the table's own empty first <th> (the
-    // feature-name column) - .tier-badge-cell:first-child is styled as a
-    // zero-width spacer for exactly this cell. Without it, the loop below's
-    // FIRST real tier cell absorbs that spacer styling instead, shifting
-    // every badge one column to the left of the tier it's actually for.
-    const spacer = document.createElement("span");
-    spacer.className = "tier-badge-cell";
-    badgeRow.appendChild(spacer);
-    table.columns.forEach((_, i) => {
-      const cell = document.createElement("span");
-      cell.className = "tier-badge-cell";
-      if (i === recommendedIndex) cell.innerHTML = `<span class="tier-badge">✨ Could be a good fit for you</span>`;
-      badgeRow.appendChild(cell);
-    });
-    wrapper.appendChild(badgeRow);
-  }
-
   const scroller = document.createElement("div");
   scroller.className = "comparison-table-scroll";
 
+  const badgeCells = table.columns
+    .map(
+      (_, i) =>
+        `<th class="tier-badge-table-cell">${
+          i === recommendedIndex ? '<span class="tier-badge">\u2728 Could be a good fit for you</span>' : ""
+        }</th>`
+    )
+    .join("");
   const headCells = table.columns
     .map((c, i) => `<th class="${i === recommendedIndex ? "tier-recommended" : ""}">${escapeHtml(c)}</th>`)
     .join("");
@@ -1531,7 +1538,10 @@ function renderTierComparisonTable(wrapper, table) {
 
   scroller.innerHTML = `
     <table class="comparison-table comparison-table-detail">
-      <thead><tr><th></th>${headCells}</tr></thead>
+      <thead>
+        ${recommendedIndex != null ? `<tr class="tier-badge-table-row"><th></th>${badgeCells}</tr>` : ""}
+        <tr><th></th>${headCells}</tr>
+      </thead>
       <tbody>${bodyRows}</tbody>
     </table>
   `;
@@ -1694,6 +1704,8 @@ function resetRatingWidget() {
 
 async function getAssistantReply() {
   const pending = addBubble("assistant pending", t().thinking, { label: t().aiLabel });
+  const showAuthStatus = authStatusPending;
+  authStatusPending = false;
   inputEl.disabled = true;
   sendBtn.disabled = true;
 
@@ -1709,6 +1721,10 @@ async function getAssistantReply() {
     }
 
     const data = await res.json();
+    if (showAuthStatus) {
+      authStatusShownFor.add(sessionId);
+      addStatusMessage(t().authComplete, pending);
+    }
     pending.innerHTML = "";
     const labelEl = document.createElement("span");
     labelEl.className = "msg-label";
@@ -1723,13 +1739,17 @@ async function getAssistantReply() {
     history.push({ role: "assistant", content: data.content });
     sessionMessageCount += 2; // the server just appended one user + one assistant message
     upsertChatListEntry();
-    addSuggestions(data.suggestions, data.human_chat_option);
-    if (activeForm && !activeForm.submitted && FORM_CONFIRM_REPLY_RE.test(data.content)) {
-      // The backend forces a tool call on the first round of every turn, which
-      // sometimes makes it re-invoke fill_customer_form on this very
-      // confirmation turn even though nothing changed -- treat the reply as
-      // the confirmation it is instead of popping up a duplicate form.
-      activeForm.markSubmitted();
+    // The auth card is the interaction; its BankID chip would just duplicate it.
+    addSuggestions(data.form?.type === "auth_choice" ? [] : data.suggestions, data.human_chat_option);
+    if (activeForm && !activeForm.submitted && (data.case_id || FORM_CONFIRM_REPLY_RE.test(data.content))) {
+      // A case ID in the reply is the reliable sign the application was
+      // submitted - the confirmation wording varies too much for the regexes
+      // alone (kept as a fallback). The backend also forces a tool call on the
+      // first round of every turn, which sometimes makes it re-invoke
+      // fill_customer_form on this very confirmation turn even though nothing
+      // changed -- treat the reply as the confirmation it is instead of
+      // popping up a duplicate form.
+      activeForm.markSubmitted(data.case_id);
     } else {
       renderForm(data.form);
     }
