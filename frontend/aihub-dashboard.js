@@ -373,6 +373,70 @@ async function loadContactRules() {
   renderOfferRulesTable();
 }
 
+// --- New: Offer performance (Marketing) - which offers are actually
+// landing, which aren't, where they're being shown, and total volume by
+// category, over a week/month/year window. Built from the same
+// impression/click log (db.OfferEvent) the bandit already writes to. ---
+
+const offerPerfRangeEl = $("offer-perf-range");
+
+function renderOfferPerformance(perf) {
+  if (!perf) {
+    $("stat-offers-shown").textContent = "—";
+    $("stat-offers-shown-sub").textContent = "—";
+    $("stat-offers-clicks").textContent = "—";
+    $("stat-offers-ctr").textContent = "—";
+    $("offer-top-clicked").innerHTML = '<div class="empty-hint">No offer activity recorded yet.</div>';
+    $("offer-zero-interest").innerHTML = '<li class="empty-hint">None yet</li>';
+    $("offer-segment-body").innerHTML = '<tr><td colspan="3" class="empty-hint">No offer activity recorded yet.</td></tr>';
+    $("offer-category-chart").innerHTML = "";
+    return;
+  }
+
+  $("stat-offers-shown").textContent = formatNumber(perf.total_impressions);
+  $("stat-offers-shown-sub").textContent = `over the selected ${perf.range}`;
+  $("stat-offers-clicks").textContent = formatNumber(perf.total_clicks);
+  $("stat-offers-ctr").textContent = `${perf.overall_ctr_pct}%`;
+
+  renderHorizontalBars($("offer-top-clicked"), perf.top_clicked, {
+    valueKey: "clicks",
+    labelKey: "title",
+    valueFormatter: (o) => `${formatNumber(o.clicks)} (${o.ctr_pct}%)`,
+  });
+
+  renderMiniList(
+    $("offer-zero-interest"),
+    perf.zero_interest.map((o) => ({ label: o.title, count: o.impressions }))
+  );
+
+  $("offer-segment-body").innerHTML = perf.segment_breakdown.length
+    ? perf.segment_breakdown
+        .map(
+          (s) => `
+      <tr>
+        <td>${escapeHtml(s.segment_label)}</td>
+        <td>${formatNumber(s.total_impressions)}</td>
+        <td>${s.offers.map((o) => `${escapeHtml(o.title)} (${formatNumber(o.impressions)})`).join(", ")}</td>
+      </tr>`
+        )
+        .join("")
+    : '<tr><td colspan="3" class="empty-hint">No offer activity recorded yet.</td></tr>';
+
+  renderVerticalBars($("offer-category-chart"), perf.category_summary, {
+    valueKey: "impressions",
+    labelFn: (c) => c.category,
+  });
+}
+
+async function loadOfferPerformance() {
+  const res = await fetch(`/api/contact-rules/offer-performance?range=${offerPerfRangeEl.value}`, {
+    headers: roleHeaders(),
+  });
+  renderOfferPerformance(res.ok ? await res.json() : null);
+}
+
+offerPerfRangeEl.addEventListener("change", () => loadOfferPerformance().catch(console.error));
+
 function renderAuditIntegrity(integrity) {
   if (integrity) {
     $("stat-audit-integrity").innerHTML = integrity.valid
@@ -398,6 +462,7 @@ async function loadDashboard() {
     wantsAudit ? fetch("/api/audit/verify", { headers: roleHeaders() }).catch(() => null) : Promise.resolve(null),
     wantsAudit ? loadAuditHistory().catch(console.error) : Promise.resolve(),
     wantsContactRules ? loadContactRules().catch(console.error) : Promise.resolve(),
+    wantsContactRules ? loadOfferPerformance().catch(console.error) : Promise.resolve(),
   ]);
 
   const data = summaryRes && summaryRes.ok ? await summaryRes.json() : null;

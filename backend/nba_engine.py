@@ -22,7 +22,10 @@ after tools.verify_customer_identity (or the fraud/dispute flow's own
 identity check) succeeds this turn, via verified_customer.get_and_clear().
 """
 
+from datetime import datetime, timedelta, timezone
+
 from . import cs_client, db
+from .interaction_history import TOPIC_LABELS
 from .knowledge import CUSTOMER_TIER_SPREADS_PERCENT
 
 # Sample marketing offers. Illustrative pricing/terms for the demo, not real
@@ -283,3 +286,102 @@ def record_click(customer_id: str, offer_code: str) -> bool:
         return False
     db.record_offer_click(customer_id, offer_code)
     return True
+
+
+# --- Offer performance (Marketing dashboard) ----------------------------
+#
+# Built straight from db.OfferEvent - the same raw impression/click log the
+# bandit (record_offer_impression/record_offer_click, db.py) already
+# writes to for its own learning, read here instead for human reporting:
+# which offers are actually landing, which aren't, where they're being
+# shown, and how much volume there's been. No new tracking needed.
+
+RANGE_TO_DAYS = {"week": 7, "month": 30, "year": 365}
+
+
+def _offer_info(code: str) -> dict:
+    offer = _BY_CODE.get(code)
+    return {
+        "code": code,
+        "title": offer["title"] if offer else code,
+        "category": offer["category"] if offer else "Other",
+    }
+
+
+def build_offer_performance(range_key: str = "month") -> dict:
+    """Everything the Marketing dashboard's offer-performance panels need,
+    filtered to the last week/month/year (`range_key`, default month):
+    top-clicked offers, offers with impressions but zero clicks, which
+    offers are shown most within each customer segment (topic_classifier.py
+    topic), and total volume split by category."""
+    days = RANGE_TO_DAYS.get(range_key, RANGE_TO_DAYS["month"])
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    events = db.get_offer_events_since(since)
+
+    impressions_by_offer: dict[str, int] = {}
+    clicks_by_offer: dict[str, int] = {}
+    impressions_by_segment: dict[str, dict[str, int]] = {}
+    impressions_by_category: dict[str, int] = {}
+
+    for event in events:
+        code = event["offer_code"]
+        if event["event_type"] == "impression":
+            impressions_by_offer[code] = impressions_by_offer.get(code, 0) + 1
+            by_offer = impressions_by_segment.setdefault(event["segment"], {})
+            by_offer[code] = by_offer.get(code, 0) + 1
+            category = _offer_info(code)["category"]
+            impressions_by_category[category] = impressions_by_category.get(category, 0) + 1
+        elif event["event_type"] == "click":
+            clicks_by_offer[code] = clicks_by_offer.get(code, 0) + 1
+
+    performance = []
+    for code in set(impressions_by_offer) | set(clicks_by_offer):
+        impressions = impressions_by_offer.get(code, 0)
+        clicks = clicks_by_offer.get(code, 0)
+        performance.append({
+            **_offer_info(code),
+            "impressions": impressions,
+            "clicks": clicks,
+            "ctr_pct": round(clicks / impressions * 100, 1) if impressions else 0.0,
+        })
+
+    top_clicked = sorted(
+        (p for p in performance if p["clicks"] > 0), key=lambda p: p["clicks"], reverse=True
+    )[:5]
+    # Zero interest requires at least one impression - an offer never shown
+    # this period isn't "failing to generate interest", it just hasn't run.
+    zero_interest = sorted(
+        (p for p in performance if p["impressions"] > 0 and p["clicks"] == 0),
+        key=lambda p: p["impressions"], reverse=True,
+    )
+
+    segment_breakdown = []
+    for segment, offers in impressions_by_segment.items():
+        top_offers = sorted(offers.items(), key=lambda kv: kv[1], reverse=True)[:3]
+        segment_breakdown.append({
+            "segment": segment,
+            "segment_label": TOPIC_LABELS.get(segment, segment.replace("_", " ").capitalize()),
+            "total_impressions": sum(offers.values()),
+            "offers": [{**_offer_info(code), "impressions": count} for code, count in top_offers],
+        })
+    segment_breakdown.sort(key=lambda s: s["total_impressions"], reverse=True)
+
+    category_summary = sorted(
+        ({"category": cat, "impressions": count} for cat, count in impressions_by_category.items()),
+        key=lambda c: c["impressions"], reverse=True,
+    )
+
+    total_impressions = sum(impressions_by_offer.values())
+    total_clicks = sum(clicks_by_offer.values())
+
+    return {
+        "range": range_key,
+        "days": days,
+        "total_impressions": total_impressions,
+        "total_clicks": total_clicks,
+        "overall_ctr_pct": round(total_clicks / total_impressions * 100, 1) if total_impressions else 0.0,
+        "top_clicked": top_clicked,
+        "zero_interest": zero_interest,
+        "segment_breakdown": segment_breakdown,
+        "category_summary": category_summary,
+    }

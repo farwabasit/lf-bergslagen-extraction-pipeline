@@ -342,6 +342,30 @@ def get_recently_clicked_offer_codes(customer_id: str, within_seconds: int = 120
         return {r[0] for r in rows}
 
 
+def get_offer_events_since(since: datetime) -> list[dict]:
+    """Every impression/click event on or after `since` - the raw material
+    for the Marketing dashboard's offer-performance view (see
+    nba_engine.build_offer_performance). Deliberately returns raw rows, not
+    an aggregate - aggregation is business logic that belongs in
+    nba_engine.py, not this plain-persistence module."""
+    with _session() as db:
+        rows = (
+            db.query(OfferEvent)
+            .filter(OfferEvent.ts >= since)
+            .all()
+        )
+        return [
+            {
+                "customer_id": r.customer_id,
+                "offer_code": r.offer_code,
+                "segment": r.segment,
+                "event_type": r.event_type,
+                "ts": r.ts,
+            }
+            for r in rows
+        ]
+
+
 def get_or_create_offer_stat(db: Session, segment: str, offer_code: str) -> OfferStat:
     stat = db.get(OfferStat, {"segment": segment, "offer_code": offer_code})
     if stat is None:

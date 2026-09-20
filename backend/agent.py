@@ -186,7 +186,7 @@ ORDER AND PRIORITY: whenever you lay out more than one thing to do, number them 
 week versus which can wait. Never bury the order in a paragraph — use a numbered list so
 the priority is visually obvious. When priorities span more than one stage, use bold
 headings, each followed by its own separate numbered list that restarts at 1 — e.g.
-"**This week's priorities:**" then "**Things to keep in mind for later:**". Within each
+"**First week's priorities:**" then "**Things to keep in mind for later:**". Within each
 list, number items sequentially (1, 2, 3, ...) — never repeat "1." for every item in the
 same list. Any unnumbered section you add in between goes between the headed lists, and
 does not break or reset either list's own numbering. (For a home purchase specifically,
@@ -326,7 +326,7 @@ item in it 1, 2, 3, ... with no restart and no other numbered or bulleted list n
 inside any item - links inside an item are plain inline markdown links in that item's own
 sentence, never a separate bullet sub-list.
 
-If the customer hasn't settled on a specific property yet, "**This week's priorities:**"
+If the customer hasn't settled on a specific property yet, "**First week's priorities:**"
 ALWAYS has exactly 4 items, in exactly this order and numbering - item 4 is never
 skipped and never merged into item 3, even when you don't yet know if it's a house or an
 apartment:
@@ -356,7 +356,7 @@ If they've already settled on a specific property AND you know it's not an apart
 item 1 (Home Search) and/or item 4 (condominium add-on) as appropriate and renumber the
 rest. Otherwise keep all 4.
 
-"**Secure the mortgage:**" is a separate list, immediately after "This week's priorities:"
+"**Secure the mortgage:**" is a separate list, immediately after "First week's priorities:"
 and before "Before you move in:", restarting at 1, with exactly 2 items in this order:
 1. Receive Purchase Agreement — the seller-signed purchase agreement (köpekontrakt) they'll
    get once their bid is accepted; needed before the next step.
@@ -618,10 +618,11 @@ TOOLS = [
             "name": "compare_home_insurance",
             "description": (
                 "Return LF Bergslagen's home insurance tier comparison (Bas/Mellan/Stor) so "
-                "the customer can evaluate levels side by side, plus a personalized tier "
-                "recommendation when the conversation gives enough signal (e.g. buying a "
-                "condo, working remotely, frequent international travel). Takes no "
-                "arguments - it reads the conversation itself."
+                "the customer can evaluate levels side by side, plus a personalized 'could be "
+                "a good fit' pointer (never a recommendation made for them) when the "
+                "conversation gives enough signal (e.g. buying a condo, working remotely, "
+                "frequent international travel). Takes no arguments - it reads the "
+                "conversation itself."
             ),
             "parameters": {"type": "object", "properties": {}},
         },
@@ -743,6 +744,19 @@ HOME_PURCHASE_KEYWORDS = [
     "köpa hus", "köpa ett hus", "köpa bostad", "köpa lägenhet",
     "köpa fritidshus", "köpa ett fritidshus", "köpa bostadsrätt",
 ]
+# AND-matched, same style as HOME_SEARCH_* below - a fixed phrase list (just
+# above) misses everyday wording like "buy MY FIRST home" or "buying OUR
+# home", where the verb and the property noun aren't adjacent. This is the
+# fallback that catches those: any buy-ish verb plus any home-ish noun,
+# anywhere in the message.
+HOME_PURCHASE_VERB_WORDS = [
+    "buy", "buying", "bought", "purchase", "purchasing", "purchased",
+    "köpa", "köper", "köpt",
+]
+HOME_PURCHASE_NOUN_WORDS = [
+    "house", "home", "apartment", "condo", "condominium", "holiday home",
+    "hus", "bostad", "lägenhet", "fritidshus", "bostadsrätt",
+]
 HOME_STAGE_INDICATOR_KEYWORDS = [
     "already bought", "just bought", "just moved in", "signed the contract",
     "closing on", "mortgage approved", "still looking", "in the process",
@@ -753,12 +767,24 @@ HOME_STAGE_INDICATOR_KEYWORDS = [
 ]
 
 
+def _mentions_home_purchase_in(text: str) -> bool:
+    if any(kw in text for kw in HOME_PURCHASE_KEYWORDS):
+        return True
+    return any(v in text for v in HOME_PURCHASE_VERB_WORDS) and any(n in text for n in HOME_PURCHASE_NOUN_WORDS)
+
+
 def _home_purchase_stage_unclear(history: list[dict]) -> bool:
     last_user = next((m.get("content", "") for m in reversed(history) if m.get("role") == "user"), "")
     text = last_user.lower()
-    mentions_home_purchase = any(kw in text for kw in HOME_PURCHASE_KEYWORDS)
     mentions_stage = any(kw in text for kw in HOME_STAGE_INDICATOR_KEYWORDS)
-    return mentions_home_purchase and not mentions_stage
+    # A specific, already-answerable question (e.g. "which home insurance
+    # level do I need for a condo I work from?") should go straight to its
+    # own flow, never get intercepted by the generic "which stage are you
+    # at" clarifying question just because it also happens to mention
+    # buying a home in passing - the customer already gave enough to work
+    # with, asking again would be a step backwards, not forwards.
+    asks_specific_question = _wants_home_insurance_comparison(history) or _wants_car_insurance_comparison(history)
+    return _mentions_home_purchase_in(text) and not mentions_stage and not asks_specific_question
 
 
 def mentions_home_purchase(history: list[dict]) -> bool:
@@ -769,7 +795,7 @@ def mentions_home_purchase(history: list[dict]) -> bool:
     last message, unlike _home_purchase_stage_unclear above (which is about
     whether THIS turn's reply should ask a clarifying question)."""
     text = " ".join(m.get("content", "") for m in history if m.get("role") == "user").lower()
-    return any(kw in text for kw in HOME_PURCHASE_KEYWORDS)
+    return _mentions_home_purchase_in(text)
 
 
 # Two word-lists, AND-matched, rather than exact phrases - a customer can ask
@@ -806,6 +832,7 @@ INSURANCE_COMPARE_WORDS = [
     "compare", "comparison", "which level", "which tier", "what level",
     "difference between", "should i get", "should i choose", "which one",
     "which is better", "full coverage or", " vs ", "versus", "which insurance",
+    "level do i need", "level should i", "insurance level", "insurance do i need",
     "jämför", "skillnaden mellan", "vilken nivå", "vilken jag ska välja",
 ]
 
@@ -900,6 +927,23 @@ ALREADY_BOUGHT_KEYWORDS = [
     "bought the apartment", "bought the house", "bought my apartment", "bought my house",
     "jag har köpt", "jag köpte", "redan köpt", "precis köpt",
 ]
+# Fixed clarifying question + exactly these 3 choices - deterministic, not
+# LLM-phrased, so the customer always sees the same short question and the
+# same three tappable chips regardless of how they phrased "I want to buy a
+# home" (see _home_purchase_stage_unclear). An LLM asked to phrase this
+# itself drifted across replies (4 options instead of 3, inconsistent
+# wording), which is exactly the reliability problem this app's "anything
+# that must be reliable is deterministic Python" rule exists to avoid.
+HOME_PURCHASE_STAGE_TEXT = {
+    "en": "To give you the best advice, could you tell me where you are in the process of buying a home?",
+    "sv": "För att kunna ge dig bästa möjliga råd, kan du berätta var i processen du befinner dig med ditt bostadsköp?",
+}
+HOME_PURCHASE_STAGE_SUGGESTIONS = {
+    "en": ["Just starting", "Actively house-hunting", "Already bought"],
+    "sv": ["Precis börjat", "Aktivt bostadsletande", "Redan köpt"],
+}
+
+
 POST_PURCHASE_AUTH_TEXT = {
     "en": (
         "Congrats on the purchase! Since this touches your actual situation, I first need "
@@ -1044,6 +1088,14 @@ def _run_agent(
     if fraud_or_dispute and not fraud_dispute_flow_resolved(history):
         return run_fraud_dispute_agent(history, lang, fraud_or_dispute)
 
+    # Checked after the above (a clear "apply for a loan promise" etc. should
+    # never be interrupted by this) but before everything else - see
+    # HOME_PURCHASE_STAGE_TEXT's comment for why this is fixed text/chips
+    # rather than left to the LLM to phrase.
+    if _home_purchase_stage_unclear(history):
+        key = "sv" if lang == "sv" else "en"
+        return HOME_PURCHASE_STAGE_TEXT[key], HOME_PURCHASE_STAGE_SUGGESTIONS[key], {}
+
     # Fallback gate for every path above that didn't already claim the turn
     # (and so didn't already run its own identity check before touching a
     # document) - see ATTACHMENT_AUTH_REQUIRED_TEXT's comment above.
@@ -1070,7 +1122,7 @@ def _run_agent(
                 "BankID at all in your reply - just answer their question directly. They have "
                 "already bought/closed on their property. Mortgage financing (the Loan Offer) "
                 "and home insurance are presumed already sorted as part of closing a Swedish "
-                "home purchase, so do NOT show a 'This week's priorities' section or mention "
+                "home purchase, so do NOT show a 'First week's priorities' section or mention "
                 "mortgage/Loan Offer/home insurance/condominium add-on as still pending. "
                 "Using the HOME PURCHASE CHECKLIST's phase grouping, show ONLY the "
                 "'**Before you move in:**' and '**Later:**' headed lists (electricity, "
@@ -1108,21 +1160,6 @@ def _run_agent(
             }
         )
     messages.extend(history)
-
-    if _home_purchase_stage_unclear(history):
-        messages.append(
-            {
-                "role": "system",
-                "content": (
-                    "The user's latest message mentions buying a home/holiday home but "
-                    "doesn't say whether they're just considering it, currently "
-                    "house-hunting/in the buying process, have already bought, or want to "
-                    "ask about one specific thing (like insurance or the mortgage). Your "
-                    "one clarifying question this turn must ask which of those fits - do "
-                    "not give home-buying advice yet, and do not assume a stage."
-                ),
-            }
-        )
 
     service_category = _detect_service_category(history)
     if service_category and not _service_already_resolved(history):
@@ -1168,10 +1205,11 @@ def _run_agent(
                     "compare_car_insurance this turn. It returns LF Bergslagen's real, live "
                     "tier comparison table - a structured table is rendered separately in the "
                     "UI from this result, so your reply text should narrate/summarize it "
-                    "briefly (e.g. which tier covers what, and a plain-language recommendation "
-                    "if the conversation gives you enough to base one on) rather than "
-                    "re-listing every row. If the tool result says no table is available, fall "
-                    "back to fetch_lf_page(\"car_insurance\") instead and describe it in text as "
+                    "briefly (e.g. which tier covers what). Present differences neutrally and "
+                    "let the customer draw their own conclusion - never tell them which one to "
+                    "pick or that one is 'the right choice', even if the conversation seems to "
+                    "point toward one. If the tool result says no table is available, fall back "
+                    "to fetch_lf_page(\"car_insurance\") instead and describe it in text as "
                     "usual - never invent table rows of your own."
                 ),
             }
@@ -1186,12 +1224,15 @@ def _run_agent(
                     "compare_home_insurance this turn. It returns LF Bergslagen's Bas/Mellan/"
                     "Stor tier comparison and, when the conversation gives enough signal "
                     "(buying a condo, working remotely, frequent international travel), a "
-                    "personalized recommended tier - a structured table (with a recommendation "
-                    "badge/footnote if one was computed) is rendered separately in the UI from "
-                    "this result, so your reply text should narrate/summarize it briefly rather "
-                    "than re-listing every row. If a recommendation was computed, you may "
-                    "briefly reinforce it in your own words, but never invent a different tier "
-                    "or reasoning than what the tool actually returned."
+                    "'could be a good fit' pointer toward one tier - a structured table (with "
+                    "that pointer as a footnote if one was computed) is rendered separately in "
+                    "the UI from this result, so your reply text should narrate/summarize it "
+                    "briefly rather than re-listing every row. If a pointer was computed, you "
+                    "may mention it in your own words as ONE OPTION worth a look - not as your "
+                    "recommendation or the choice they should make; explicitly leave the "
+                    "decision to them (or suggest an LF Bergslagen advisor if they want help "
+                    "deciding). Never invent a different tier or reasoning than what the tool "
+                    "actually returned."
                 ),
             }
         )
@@ -1249,8 +1290,10 @@ def _run_agent(
     # These flows already have explicit tool-calling instructions of their
     # own, so skip the forced call and let the model ask its question first.
     structured_flow_active = bool(
-        _home_purchase_stage_unclear(history)
-        or (_detect_service_category(history) and not _service_already_resolved(history))
+        # _home_purchase_stage_unclear is deliberately not listed here - it's
+        # now an early return in _run_agent (see HOME_PURCHASE_STAGE_TEXT),
+        # so this point is never reached while it's true.
+        (_detect_service_category(history) and not _service_already_resolved(history))
         or (_detect_identity_flow(history) and not _identity_flow_resolved(history))
         or (_wants_callback(history) and not _callback_already_resolved(history))
         or _wants_case_status(history)

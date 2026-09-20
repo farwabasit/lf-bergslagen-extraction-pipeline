@@ -696,6 +696,59 @@
   background: var(--lf-blue-dark);
 }
 
+/* Static speech-bubble label next to the fab, telling a visitor what the
+   floating icon actually is - permanently visible (not a dismissible
+   tooltip) whenever the fab itself is, see site.js. Positioned to the
+   fab's left with a small triangular tail pointing at it. */
+.chat-widget-greeting {
+  align-items: center;
+  background: white;
+  border-radius: 14px;
+  bottom: 24px;
+  box-shadow: 0 10px 24px rgba(9, 41, 68, 0.22);
+  color: var(--text-main, #0d2436);
+  display: flex;
+  font-size: 14px;
+  font-weight: 600;
+  gap: 10px;
+  max-width: 260px;
+  padding: 12px 16px;
+  position: fixed;
+  right: 96px;
+  z-index: 998;
+  pointer-events: none;
+}
+
+.chat-widget-greeting::after {
+  border: 8px solid transparent;
+  border-left-color: white;
+  content: "";
+  position: absolute;
+  right: -14px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.chat-widget-greeting-avatar {
+  border-radius: 50%;
+  flex-shrink: 0;
+  height: 36px;
+  object-fit: cover;
+  width: 36px;
+}
+
+@media (max-width: 480px) {
+  .chat-widget-greeting {
+    right: 12px;
+    bottom: 92px;
+    max-width: calc(100vw - 24px);
+  }
+
+  .chat-widget-greeting::after {
+    display: none;
+  }
+}
+
 .chat-widget {
   background: white;
   border-radius: 12px;

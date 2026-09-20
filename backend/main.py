@@ -57,6 +57,19 @@ DECLINE_RE = re.compile(
     re.IGNORECASE,
 )
 
+# A CS rep's own closing message (asking for feedback/rating/review/
+# comments/thoughts/ideas/suggestions) is itself the closing signal when a
+# human has taken over the chat - unlike Sara's own flow above, there's no
+# separate "customer declined" turn to pair it with; a human agent
+# wrapping up this way already means the conversation is over. See the
+# offer-surfacing block in poll_session below.
+AGENT_FEEDBACK_REQUEST_RE = re.compile(
+    r"feedback|rate this chat|rating|\breview\b|your thoughts|thoughts (?:on|about) (?:this|the) chat|"
+    r"any (?:suggestions|ideas|comments)|\bcomments?\b|let us know what you think|"
+    r"betyg|recension|dina tankar|synpunkter|förslag",
+    re.IGNORECASE,
+)
+
 
 def _is_closing_decline(history: list[dict]) -> bool:
     """True when the customer's latest message declines a closing question
@@ -217,9 +230,15 @@ def chat(req: ChatRequest) -> dict:
         # Auto check-off: a just-created case answers one of the sidebar
         # checklist's own questions, so tick it without waiting for the
         # customer to separately say "I've done that" (see plans.mark_task_done).
+        # Independent ifs, not if/elif: `topic` is classified from the WHOLE
+        # conversation (classify_topic), so it stays "mortgage_loan_promise"
+        # for the rest of a chat that touched mortgage earlier even once the
+        # customer has moved on to home insurance - an elif here would let
+        # that stale topic block the home_insurance check-off from ever
+        # running in the same conversation a mortgage was also arranged in.
         if topic in ("mortgage_loan_promise", "mortgage_loan_offer"):
             plans.mark_task_done(req.session_id, "mortgage")
-        elif HOME_INSURANCE_MENTION_RE.search(reply):
+        if HOME_INSURANCE_MENTION_RE.search(reply):
             # No dedicated topic value exists for this (submit_insurance_application
             # in agent.py creates a generic "OTHER"-typed case, not classified by
             # topic_classifier.py the way the mortgage flows are), so this checks
@@ -371,12 +390,33 @@ def poll_session(session_id: str, after: int = 0) -> dict:
     total = after + len(new_messages)
     all_messages = sessions.messages_after(session_id, 0)
     session = sessions.get(session_id) or {}
-    return {
+    result = {
         "messages": new_messages,
         "next_after": total,
         "assigned_agent": session.get("assigned_agent"),
         "progress": compute_transition_progress(all_messages),
     }
+
+    # Next Best Action offers for a human-handled chat: Sara's own flow
+    # surfaces offers right after her closing question (see chat() above),
+    # but once a CS rep has taken over there's no more Sara turn to attach
+    # that to - the rep's OWN closing message (asking for feedback/rating/
+    # etc.) is the equivalent signal instead. Only ever fires once per such
+    # message, the same way chat()'s own offer-surfacing is a one-shot per
+    # closing-decline turn: a message only ever appears in `new_messages`
+    # once, on the poll that first crosses its position.
+    verified_customer_id = db.get_chat_verified_customer(session_id)
+    agent_requests_feedback = any(
+        m.get("role") == "human" and AGENT_FEEDBACK_REQUEST_RE.search(m.get("content") or "")
+        for m in new_messages
+    )
+    if verified_customer_id and agent_requests_feedback:
+        offers = nba_engine.get_offers_for_customer(verified_customer_id, "general")
+        if offers:
+            result["offers"] = offers
+            result["offers_customer_id"] = verified_customer_id
+
+    return result
 
 
 @app.post("/api/sessions/{session_id}/customer-message")
@@ -465,7 +505,7 @@ def send_human_message(session_id: str, body: HumanMessage) -> dict:
 # to a single section like the audit endpoints below do.
 INTERACTIONS_SUMMARY_KEYS = {
     "interactions", "topics", "avg_session_duration_seconds",
-    "handoffs", "cases_triggered", "satisfaction",
+    "handoffs", "cases_triggered", "satisfaction", "customer_insights",
 }
 AI_ANALYTICS_SUMMARY_KEYS = {
     "tokens", "technical", "token_trend_by_topic", "satisfaction_latency_correlation",
@@ -828,6 +868,24 @@ def set_contact_rules_offer_tiers(body: OfferTierRulesRequest, x_dashboard_role:
         raise HTTPException(status_code=422, detail=f"Unknown tier(s): {', '.join(sorted(unknown_tiers))}.")
     db.set_offer_tier_restrictions(body.offer_code, body.tiers)
     return {"ok": True, "offer_code": body.offer_code, "tiers": body.tiers}
+
+
+@app.get("/api/contact-rules/offer-performance")
+def get_offer_performance(
+    range: str = "month", x_dashboard_role: str | None = Header(default=None)
+) -> dict:
+    """Marketing's offer-effectiveness view: top-clicked offers, offers
+    getting zero interest, which offers are shown most per customer
+    segment, and total volume by category - filterable to the last
+    week/month/year. Same MARKETING-only gate as the rest of Contact Rules;
+    this is a reporting view over the same offer catalog/click data those
+    settings govern, not a separate concern."""
+    roles.require_role(x_dashboard_role, "contact_rules")
+    if range not in nba_engine.RANGE_TO_DAYS:
+        raise HTTPException(
+            status_code=422, detail=f"range must be one of: {', '.join(nba_engine.RANGE_TO_DAYS)}."
+        )
+    return nba_engine.build_offer_performance(range)
 
 
 app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")

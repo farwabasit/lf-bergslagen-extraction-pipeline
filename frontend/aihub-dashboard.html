@@ -195,11 +195,71 @@
     </section>
 
     <section class="section" data-role-section="contact_rules" hidden>
-      <h2 class="section-title">Contact Rules</h2>
-      <p class="section-note">
-        For Marketing: who gets shown which offer, and how often. Changes take effect immediately -
-        no restart needed.
+      <h2 class="section-title">Marketing Offers and Campaigns</h2>
+
+      <div class="panel-head-row">
+        <h3 class="panel-title" style="margin:0;">Offer performance</h3>
+        <select id="offer-perf-range" class="audit-filter">
+          <option value="week">This week</option>
+          <option value="month" selected>This month</option>
+          <option value="year">This year</option>
+        </select>
+      </div>
+      <p class="section-note" style="margin-top:-8px;">
+        How offers shown to customers over the selected period are actually landing - use this to
+        spot what's working, what's not, and where to focus the next campaign.
       </p>
+
+      <div class="stat-grid">
+        <div class="stat-card">
+          <div class="stat-label">Offers shown</div>
+          <div class="stat-value" id="stat-offers-shown">—</div>
+          <div class="stat-sub" id="stat-offers-shown-sub">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Total clicks</div>
+          <div class="stat-value" id="stat-offers-clicks">—</div>
+          <div class="stat-sub">across all offers</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Overall click-through rate</div>
+          <div class="stat-value" id="stat-offers-ctr">—</div>
+          <div class="stat-sub">clicks ÷ impressions</div>
+        </div>
+      </div>
+
+      <div class="panel-grid">
+        <div class="panel">
+          <h3 class="panel-title">Most clicked offers</h3>
+          <p class="panel-hint">Ranked by clicks - the offers generating the most real interest. Click-through rate shown in parentheses.</p>
+          <div id="offer-top-clicked" class="bar-chart bar-chart-horizontal"></div>
+        </div>
+
+        <div class="panel">
+          <h3 class="panel-title">Getting no interest</h3>
+          <p class="panel-hint">Shown to customers this period but never clicked - candidates to retire, redesign, or re-target.</p>
+          <ul id="offer-zero-interest" class="mini-list"></ul>
+        </div>
+      </div>
+
+      <div class="panel-grid">
+        <div class="panel panel-wide">
+          <h3 class="panel-title">Most-shown offers by customer segment</h3>
+          <p class="panel-hint">Which offers dominate each segment's impressions - segments are the same topics Sara's own conversations are classified into.</p>
+          <table class="token-table" id="offer-segment-table">
+            <thead>
+              <tr><th>Segment</th><th>Impressions</th><th>Top offers</th></tr>
+            </thead>
+            <tbody id="offer-segment-body"></tbody>
+          </table>
+        </div>
+
+        <div class="panel">
+          <h3 class="panel-title">Volume by category</h3>
+          <p class="panel-hint">Total offers presented this period, split by product category.</p>
+          <div id="offer-category-chart" class="bar-chart bar-chart-vertical"></div>
+        </div>
+      </div>
 
       <div class="panel">
         <h3 class="panel-title">Click cooldown</h3>
@@ -237,7 +297,7 @@
 
     <div id="no-access-hint" class="no-access-hint" hidden>
       This role has no dashboard sections to show. Switch roles above to see Interactions,
-      AI Analytics, Audit Trail, or Contact Rules.
+      AI Analytics, Audit Trail, or Marketing Offers and Campaigns.
     </div>
   </main>
 

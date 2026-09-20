@@ -11,6 +11,7 @@ const closeBtn = document.getElementById("chat-widget-close");
 const maximizeBtn = document.getElementById("chat-widget-maximize");
 const fullscreenBtn = document.getElementById("chat-widget-fullscreen");
 const frameEl = document.getElementById("chat-widget-frame");
+const greetingEl = document.getElementById("chat-widget-greeting");
 
 let frameReady = false;
 let pendingText = null;
@@ -50,11 +51,13 @@ function openWidget(text) {
     frameEl.src = "index.html";
   }
   widgetEl.hidden = false;
+  greetingEl.hidden = true;
   if (text) sendToChat(text);
 }
 
 function closeWidget() {
   widgetEl.hidden = true;
+  greetingEl.hidden = false;
 }
 
 function setSizeMode(mode) {
@@ -70,9 +73,11 @@ function setSizeMode(mode) {
   fullscreenBtn.title = mode === "fullscreen" ? "Exit full screen" : "Full screen";
   fullscreenBtn.setAttribute("aria-label", mode === "fullscreen" ? "Exit full screen" : "Full screen chat");
 
-  // The fab has nowhere sensible to sit once the panel covers the whole
-  // viewport, and the panel's own close button is still reachable there.
+  // The fab (and its greeting label) has nowhere sensible to sit once the
+  // panel covers the whole viewport, and the panel's own close button is
+  // still reachable there.
   fabBtn.hidden = mode === "fullscreen";
+  greetingEl.hidden = mode === "fullscreen" || !widgetEl.hidden;
 
   postToFrame({ type: "ltn-widget-mode", mode: mode === "compact" ? "compact" : "full" });
 }

@@ -33,27 +33,7 @@ const progressRingPercentEl = document.getElementById("progress-ring-percent");
 const progressRingTitleEl = document.getElementById("progress-ring-title");
 const progressStepsEl = document.getElementById("progress-steps");
 const PROGRESS_RING_CIRCUMFERENCE = 2 * Math.PI * 28;
-const portfolioPanelEl = document.getElementById("portfolio-panel");
-const portfolioTitleEl = document.getElementById("portfolio-title");
-const portfolioItemsEl = document.getElementById("portfolio-items");
-const portfolioToggleBtn = document.getElementById("portfolio-toggle-btn");
 const chatListHeadingEl = document.getElementById("chat-list-heading");
-
-// Persisted per-browser, same pattern as the plan panel's own collapse
-// state (ltn-plan-collapsed) - see buildPlanPanelShell below.
-let portfolioCollapsed = localStorage.getItem("ltn-portfolio-collapsed") === "1";
-function applyPortfolioCollapsed() {
-  portfolioItemsEl.hidden = portfolioCollapsed;
-  portfolioToggleBtn.textContent = portfolioCollapsed ? "+" : "−";
-  portfolioToggleBtn.title = portfolioCollapsed ? "Expand" : "Minimize";
-  portfolioToggleBtn.setAttribute("aria-expanded", String(!portfolioCollapsed));
-}
-portfolioToggleBtn.addEventListener("click", () => {
-  portfolioCollapsed = !portfolioCollapsed;
-  localStorage.setItem("ltn-portfolio-collapsed", portfolioCollapsed ? "1" : "0");
-  applyPortfolioCollapsed();
-});
-applyPortfolioCollapsed();
 
 // The toggle sets the UI language and is a fallback for ambiguous messages,
 // but the backend still matches whatever language the user actually types
@@ -89,18 +69,6 @@ const I18N = {
     rateThanks: "Thanks for your feedback!",
     offersHeading: "You might also be interested in",
     topicPrompt: "Not sure where to start? Choose a topic",
-    portfolioTitle: "Your activity",
-    portfolioEmpty: "Nothing here yet.",
-    portfolioUrgent: "Urgent",
-    portfolioCompleted: "Completed",
-    activityChats: "Chats with Sara",
-    activityCasesOpen: "Open",
-    activityCasesInProgress: "In progress",
-    activityCasesClosed: "Closed",
-    activityTopTopics: "Top topics",
-    activityTopUrgent: "Most urgent cases",
-    activityNoCases: "No cases yet.",
-    activityNoTopics: "No topics yet.",
     planEmptyHeading: "My transition plan",
     planEmptyCopy: "Buying a home? Create a checklist you can update as you go.",
     planCreateBtn: "Create home-purchase plan",
@@ -164,18 +132,6 @@ const I18N = {
     rateThanks: "Tack för din feedback!",
     offersHeading: "Detta kan också intressera dig",
     topicPrompt: "Osäker på var du ska börja? Välj ett ämne",
-    portfolioTitle: "Din aktivitet",
-    portfolioEmpty: "Inget här ännu.",
-    portfolioUrgent: "Brådskande",
-    portfolioCompleted: "Klart",
-    activityChats: "Chattar med Sara",
-    activityCasesOpen: "Öppna",
-    activityCasesInProgress: "Pågående",
-    activityCasesClosed: "Avslutade",
-    activityTopTopics: "Vanligaste ämnen",
-    activityTopUrgent: "Mest brådskande ärenden",
-    activityNoCases: "Inga ärenden ännu.",
-    activityNoTopics: "Inga ämnen ännu.",
     planEmptyHeading: "Min övergångsplan",
     planEmptyCopy: "Ska du köpa bostad? Skapa en checklista du kan uppdatera efter hand.",
     planCreateBtn: "Skapa checklista för bostadsköp",
@@ -230,8 +186,8 @@ function applyLanguage(lang) {
   document.querySelectorAll(".brand-sub").forEach((el) => (el.textContent = strings.brandSub));
   chatListHeadingEl.textContent = strings.chatsHeading;
   applyChatsCollapsed();
-  greetingLabelEl.textContent = strings.greetingLabel;
   greetingTextEl.textContent = strings.greeting;
+  renderGreetingLabel(strings);
   inputEl.placeholder = strings.placeholder;
   sendBtn.textContent = strings.send;
   humanBtnLabel.textContent = strings.humanBtn;
@@ -242,13 +198,12 @@ function applyLanguage(lang) {
   chatSearchInputEl.placeholder = strings.chatSearchPlaceholder;
   renderChatList();
   if (!ratingSubmitted) ratingLabelEl.textContent = strings.rateLabel;
-  portfolioTitleEl.textContent = strings.portfolioTitle;
-  // Plan/activity panel content is rendered client-side from t() (see
-  // renderPlan/renderActivitySummary), so switching languages needs to
-  // re-render them explicitly - they don't otherwise refresh until the
-  // next chat turn. Both are cheap and no-ops when nothing's loaded yet.
+  // Plan panel content is rendered client-side from t() (see renderPlan),
+  // so switching languages needs to re-render it explicitly - it doesn't
+  // otherwise refresh until the next chat turn. Both calls are cheap and
+  // no-ops when nothing's loaded yet.
   loadPlan();
-  refreshPortfolioPanel();
+  refreshAuthenticatedSidebar();
 
   chipsEl.innerHTML = "";
   const dropdown = document.createElement("div");
@@ -317,8 +272,8 @@ let sessionId =
   })();
 
 // The last session_id in THIS browser tab that actually verified identity
-// (see refreshPortfolioPanel). Once set, it's used as a FALLBACK source for
-// the plan/activity/chats panels whenever the currently-viewed chat
+// (see refreshAuthenticatedSidebar). Once set, it's used as a FALLBACK source for
+// the Chats/Plan panels whenever the currently-viewed chat
 // (sessionId, which can be a completely different, never-verified past
 // chat the customer just clicked open) hasn't itself verified - otherwise
 // switching to any old, unverified chat would hide those panels entirely
@@ -379,11 +334,13 @@ function buildPlanPanelShell(titleText) {
   const body = document.createElement("div");
   body.className = "plan-panel-body";
   body.hidden = planPanelCollapsed;
+  planPanelEl.classList.toggle("collapsed", planPanelCollapsed);
 
   toggleBtn.addEventListener("click", () => {
     planPanelCollapsed = !planPanelCollapsed;
     localStorage.setItem("ltn-plan-collapsed", planPanelCollapsed ? "1" : "0");
     body.hidden = planPanelCollapsed;
+    planPanelEl.classList.toggle("collapsed", planPanelCollapsed);
     toggleBtn.textContent = planPanelCollapsed ? "+" : "−";
     toggleBtn.title = planPanelCollapsed ? t().planToggleExpand : t().planToggleMinimize;
     toggleBtn.setAttribute("aria-expanded", String(!planPanelCollapsed));
@@ -686,6 +643,23 @@ function addSpeakButton(labelEl, text) {
   labelEl.appendChild(btn);
 }
 
+// The static greeting bubble (shown on page load and after "+ New chat")
+// used to just set greetingLabelEl.textContent directly, which skipped the
+// .msg-label-text wrapper every OTHER assistant bubble's label gets its
+// small-caps styling from (see addBubble) and never got a speak button -
+// so it looked and behaved differently from every real reply. Rebuilding
+// it the same way addBubble does keeps it visually and functionally
+// consistent, and re-running this on every applyLanguage call (language
+// toggle, new chat) keeps the speak button's captured text in sync too.
+function renderGreetingLabel(strings) {
+  greetingLabelEl.innerHTML = "";
+  const labelText = document.createElement("span");
+  labelText.className = "msg-label-text";
+  labelText.textContent = strings.greetingLabel;
+  greetingLabelEl.appendChild(labelText);
+  addSpeakButton(greetingLabelEl, strings.greeting);
+}
+
 function addBubble(role, text, { markdown = false, label = "", speakable = false } = {}) {
   const div = document.createElement("div");
   div.className = `msg ${role}`;
@@ -981,82 +955,6 @@ function addFormSaveError() {
   messagesEl.scrollTop = messagesEl.scrollHeight;
 }
 
-// --- "Your Activity" panel (left sidebar) ---
-//
-// Shown once this browser session has verified a customer's identity (see
-// verify_customer_identity in backend/tools.py). Backed by
-// GET /api/sessions/{sessionId}/activity-summary, which only returns data
-// if the SERVER remembers this session_id as verified - the panel never
-// sends or trusts a customer_id itself, so switching to a chat that was
-// never verified in this browser just hides the panel instead of showing
-// someone else's activity.
-
-// Renders the "Your Activity" summary: chat count, case counts by status,
-// top topics, top urgent cases - NOT the raw interaction-by-interaction
-// list this panel used to show (see build_activity_summary in
-// backend/interaction_history.py).
-function renderActivitySummary(summary) {
-  portfolioItemsEl.innerHTML = "";
-  const strings = t();
-
-  const chatsRow = document.createElement("div");
-  chatsRow.className = "activity-stat-row";
-  chatsRow.innerHTML = `<span class="activity-stat-label">${escapeHtml(strings.activityChats)}</span><span class="activity-stat-value">${summary.total_chats}</span>`;
-  portfolioItemsEl.appendChild(chatsRow);
-
-  const cases = summary.cases || { open: 0, in_progress: 0, closed: 0 };
-  const casesSection = document.createElement("div");
-  casesSection.className = "activity-section";
-  casesSection.innerHTML = `
-    <div class="activity-stat-row"><span class="activity-stat-label">${escapeHtml(strings.activityCasesOpen)}</span><span class="activity-stat-value">${cases.open}</span></div>
-    <div class="activity-stat-row"><span class="activity-stat-label">${escapeHtml(strings.activityCasesInProgress)}</span><span class="activity-stat-value">${cases.in_progress}</span></div>
-    <div class="activity-stat-row"><span class="activity-stat-label">${escapeHtml(strings.activityCasesClosed)}</span><span class="activity-stat-value">${cases.closed}</span></div>
-  `;
-  portfolioItemsEl.appendChild(casesSection);
-
-  const topicsSection = document.createElement("div");
-  topicsSection.className = "activity-section";
-  const topicsHeading = document.createElement("div");
-  topicsHeading.className = "activity-section-heading";
-  topicsHeading.textContent = strings.activityTopTopics;
-  topicsSection.appendChild(topicsHeading);
-  if (summary.top_topics && summary.top_topics.length) {
-    for (const topic of summary.top_topics) {
-      const row = document.createElement("div");
-      row.className = "activity-list-row";
-      row.textContent = topic;
-      topicsSection.appendChild(row);
-    }
-  } else {
-    const empty = document.createElement("div");
-    empty.className = "portfolio-empty";
-    empty.textContent = strings.activityNoTopics;
-    topicsSection.appendChild(empty);
-  }
-  portfolioItemsEl.appendChild(topicsSection);
-
-  const urgentSection = document.createElement("div");
-  urgentSection.className = "activity-section";
-  const urgentHeading = document.createElement("div");
-  urgentHeading.className = "activity-section-heading";
-  urgentHeading.textContent = strings.activityTopUrgent;
-  urgentSection.appendChild(urgentHeading);
-  if (summary.top_urgent_cases && summary.top_urgent_cases.length) {
-    for (const item of summary.top_urgent_cases) {
-      const row = document.createElement("div");
-      row.className = "activity-list-row";
-      row.innerHTML = `${escapeHtml(item.label)}${item.status_label ? ` <span class="portfolio-case-id">${escapeHtml(item.status_label)}</span>` : ""}`;
-      urgentSection.appendChild(row);
-    }
-  } else {
-    const empty = document.createElement("div");
-    empty.className = "portfolio-empty";
-    empty.textContent = strings.activityNoCases;
-    urgentSection.appendChild(empty);
-  }
-  portfolioItemsEl.appendChild(urgentSection);
-}
-
 // The "Chats" list (sidebar history) and "My Home Purchase" plan panel are
 // both per-browser/per-conversation content that's meaningless to show to a
 // visitor who hasn't verified their identity in THIS chat yet - the plan
@@ -1064,17 +962,31 @@ function renderActivitySummary(summary) {
 // agent.mentions_home_purchase), but the persisted, cross-chat CHECKLIST
 // view of it is gated the same way "Your Activity" already is: hidden by
 // default, revealed only once this session's customer has verified.
+// Tracks whether the sidebar was already showing as authenticated the
+// last time this ran, in THIS browser tab - lets the true->false->true
+// edge below be told apart from "still authenticated, nothing changed".
+let sidebarWasAuthenticated = false;
+
 function setAuthenticatedSidebarVisible(visible) {
+  if (visible && !sidebarWasAuthenticated) {
+    // Just verified in this browser tab - show My Home Purchase expanded
+    // by default rather than carrying over a stale collapsed state from
+    // before she'd even authenticated (see loadPlan re-render below).
+    planPanelCollapsed = false;
+    localStorage.setItem("ltn-plan-collapsed", "0");
+    loadPlan();
+  }
+  sidebarWasAuthenticated = visible;
   chatsSectionEl.hidden = !visible;
   planPanelEl.hidden = !visible;
 }
 
 // Collapse/expand for the "Chats" section - same persisted-per-browser
-// pattern as the plan panel's own toggle (ltn-plan-collapsed) and the
-// portfolio panel's (ltn-portfolio-collapsed).
+// pattern as the plan panel's own toggle (ltn-plan-collapsed).
 let chatsCollapsed = localStorage.getItem("ltn-chats-collapsed") === "1";
 function applyChatsCollapsed() {
   chatsSectionBodyEl.hidden = chatsCollapsed;
+  chatsSectionEl.classList.toggle("collapsed", chatsCollapsed);
   chatsToggleBtn.textContent = chatsCollapsed ? "+" : "−";
   chatsToggleBtn.title = chatsCollapsed ? t().planToggleExpand : t().planToggleMinimize;
   chatsToggleBtn.setAttribute("aria-expanded", String(!chatsCollapsed));
@@ -1092,7 +1004,14 @@ async function fetchActivityFor(forSessionId) {
   return res.json();
 }
 
-async function refreshPortfolioPanel() {
+// Checks whether this session (or an earlier-verified one in this browser
+// tab - see verifiedSessionId) is tied to a verified customer, and shows/
+// hides the Chats + My Home Purchase sections accordingly. Named for what
+// it actually does now that there's no "Your Activity" panel left to
+// refresh - it still calls the activity-summary endpoint purely for its
+// verified/customer_id fields, which is the cheapest existing signal for
+// this check.
+async function refreshAuthenticatedSidebar() {
   const requestedSessionId = sessionId;
   try {
     let data = await fetchActivityFor(requestedSessionId);
@@ -1101,9 +1020,8 @@ async function refreshPortfolioPanel() {
 
     // This exact chat never verified - fall back to whichever session in
     // this browser tab DID, same reasoning as loadPlan's fallback above,
-    // so the Chats/Activity/Plan panels stay up the whole time she's
-    // browsing her own chat history, not just in the one chat where she
-    // happened to verify.
+    // so the Chats/Plan sections stay up the whole time she's browsing her
+    // own chat history, not just in the one chat where she happened to verify.
     if (!data.verified && verifiedSessionId && verifiedSessionId !== requestedSessionId) {
       data = await fetchActivityFor(verifiedSessionId);
       if (sessionId !== requestedSessionId) return;
@@ -1112,18 +1030,14 @@ async function refreshPortfolioPanel() {
 
     if (!data.verified) {
       verifiedSessionId = null;
-      portfolioPanelEl.hidden = true;
       setAuthenticatedSidebarVisible(false);
       return;
     }
     verifiedSessionId = sourceSessionId;
-    portfolioPanelEl.hidden = false;
     setAuthenticatedSidebarVisible(true);
-    renderActivitySummary(data);
     mergeCustomerChatHistory(data.customer_id);
   } catch (err) {
     console.error(err);
-    portfolioPanelEl.hidden = true;
     setAuthenticatedSidebarVisible(false);
   }
 }
@@ -1580,6 +1494,14 @@ function renderTierComparisonTable(wrapper, table) {
   if (recommendedIndex != null) {
     const badgeRow = document.createElement("div");
     badgeRow.className = "tier-badge-row";
+    // Leading spacer matching the table's own empty first <th> (the
+    // feature-name column) - .tier-badge-cell:first-child is styled as a
+    // zero-width spacer for exactly this cell. Without it, the loop below's
+    // FIRST real tier cell absorbs that spacer styling instead, shifting
+    // every badge one column to the left of the tier it's actually for.
+    const spacer = document.createElement("span");
+    spacer.className = "tier-badge-cell";
+    badgeRow.appendChild(spacer);
     table.columns.forEach((_, i) => {
       const cell = document.createElement("span");
       cell.className = "tier-badge-cell";
@@ -1823,7 +1745,7 @@ async function getAssistantReply() {
     }
     loadPlan();
     showRatingBar();
-    refreshPortfolioPanel();
+    refreshAuthenticatedSidebar();
   } catch (err) {
     pending.textContent = t().chatError;
     pending.className = "msg assistant";
@@ -2133,7 +2055,17 @@ humanBtn.addEventListener("click", requestHumanHandoff);
 
 // --- Poll for messages a human support colleague sends from the dashboard ---
 
+// Guards against overlapping calls: the interval below and the
+// visibilitychange listener further down can both fire pollForHumanMessages
+// independently, and since sessionMessageCount is only updated at the END
+// of the (async) call, two overlapping calls can both read the SAME stale
+// count, both fetch the SAME "new" messages, and both render them - the
+// exact duplicate message/offer bug this flag prevents.
+let pollInFlight = false;
+
 async function pollForHumanMessages() {
+  if (pollInFlight) return;
+  pollInFlight = true;
   try {
     const res = await fetch(`/api/sessions/${sessionId}/poll?after=${sessionMessageCount}`);
     if (!res.ok) return;
@@ -2154,13 +2086,32 @@ async function pollForHumanMessages() {
         });
       }
     }
+    // The CS rep's own closing message (asking for feedback/rating/etc.)
+    // is the human-handoff equivalent of Sara's own closing question - see
+    // poll_session in main.py for when the backend includes these.
+    addOffers(data.offers, data.offers_customer_id);
     sessionMessageCount = data.next_after;
   } catch (err) {
     // silent -- this is a background poll, not a user-initiated action
+  } finally {
+    pollInFlight = false;
   }
 }
 
 setInterval(pollForHumanMessages, 3000);
+
+// Chrome (and most browsers) throttle setInterval way down - often to once
+// a minute or less - in a tab that's backgrounded/hidden, which is exactly
+// what happens while a CS rep is typing a reply in the OTHER (Workspace)
+// tab/window. Without this, a customer who switches back to this tab could
+// wait a minute or more before the human reply actually shows up, looking
+// like it never arrived at all. Polling immediately the moment this tab
+// becomes visible again closes that gap.
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") {
+    pollForHumanMessages();
+  }
+});
 
 // --- Brief, self-dismissing status message - currently only used to explain
 // why a sidebar chat just vanished (see loadChat's 404 branch below), rather
@@ -2227,7 +2178,7 @@ function upsertChatListEntry() {
 async function mergeCustomerChatHistory(customerId) {
   if (!customerId) return;
   const requestedSessionId = sessionId;
-  // Always the session that actually verified (see refreshPortfolioPanel,
+  // Always the session that actually verified (see refreshAuthenticatedSidebar,
   // which sets this right before calling here) - the CURRENTLY viewed chat
   // (sessionId) may be a different, never-verified one, which this
   // customer-scoped endpoint would otherwise correctly refuse.
@@ -2371,7 +2322,7 @@ function startNewChat() {
   sessionId = crypto.randomUUID();
   sessionStorage.setItem("ltn-session-id", sessionId);
   // Must happen before resetChatView (which triggers loadPlan/
-  // refreshPortfolioPanel via applyLanguage) - otherwise those calls would
+  // refreshAuthenticatedSidebar via applyLanguage) - otherwise those calls would
   // fall back to the just-abandoned chat's verified session and show her
   // plan/activity in this brand new, not-yet-verified chat.
   verifiedSessionId = null;
@@ -2379,7 +2330,6 @@ function startNewChat() {
   chatSearchInputEl.value = "";
   renderEmptyPlan();
   renderChatList();
-  portfolioPanelEl.hidden = true;
   setAuthenticatedSidebarVisible(false);
 }
 
@@ -2426,10 +2376,9 @@ async function applySessionData(id, data) {
       // A session row can exist server-side with no messages yet (e.g. only
       // "talk to a person" was clicked before anything was said) - show the
       // greeting rather than leaving the panel blank, same as a new chat.
-      const greetingDiv = document.createElement("div");
-      greetingDiv.className = "msg assistant";
-      greetingDiv.innerHTML = `<span class="msg-label">${escapeHtml(t().greetingLabel)}</span><p>${escapeHtml(t().greeting)}</p>`;
-      messagesEl.appendChild(greetingDiv);
+      // Uses addBubble (not raw HTML) so it gets the same label styling and
+      // speak button every other assistant bubble has.
+      addBubble("assistant", t().greeting, { label: t().greetingLabel, speakable: true });
     }
     chipsEl.style.display = "none";
     for (const msg of data.messages) {
@@ -2462,7 +2411,7 @@ async function applySessionData(id, data) {
     }
     await loadPlan();
     renderChatList();
-    refreshPortfolioPanel();
+    refreshAuthenticatedSidebar();
 }
 
 async function loadChat(id) {
@@ -2495,7 +2444,7 @@ async function loadChat(id) {
 // silently reflect that old session's state while the visible chat area
 // still showed nothing but the default greeting. A 404 here (brand new
 // tab, session_id never sent a message yet) is normal, not an error - it
-// falls through to the same empty-state loadPlan/refreshPortfolioPanel
+// falls through to the same empty-state loadPlan/refreshAuthenticatedSidebar
 // calls a fresh chat gets.
 async function restoreCurrentSession() {
   try {
@@ -2511,7 +2460,7 @@ async function restoreCurrentSession() {
     console.error(err);
   }
   loadPlan();
-  refreshPortfolioPanel();
+  refreshAuthenticatedSidebar();
 }
 
 // --- Embeddable widget integration: lets a parent marketing page (see

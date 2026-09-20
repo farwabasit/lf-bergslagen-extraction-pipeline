@@ -1163,9 +1163,15 @@ def run_loan_promise_agent(history: list[dict], lang: str | None = None) -> tupl
         "content": (
             "The customer authenticated via BankID using only their personnummer - a real "
             "BankID login already confirms the name and date of birth behind it, so do not ask "
-            "for those separately. Their details: "
+            "for those separately. Their details (for your own use only - see below): "
             f"full_name={bankid_customer['name']}, personnummer={bankid_customer['personnummer']}, "
-            f"dob={bankid_customer['dob']}. Treat step 1 (IDENTITY) as complete with these values."
+            f"dob={bankid_customer['dob']}. Treat step 1 (IDENTITY) as complete with these values. "
+            "Never state the personnummer, date of birth, or full name back to the customer in "
+            "your reply - they already know their own details, and reciting them in chat is an "
+            "unnecessary exposure of personal data. If your first reply after authentication "
+            "needs to acknowledge it, say only that they're now verified/authenticated, then move "
+            "straight to what happens next (e.g. asking for the still-missing documents) - never "
+            "list the identity values themselves."
         ),
     })
     messages.extend(history)
