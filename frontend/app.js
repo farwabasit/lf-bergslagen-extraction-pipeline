@@ -1577,21 +1577,17 @@ function renderTierComparisonTable(wrapper, table) {
     wrapper.appendChild(toggle);
   }
 
-  if (recommendedIndex != null) {
-    const badgeRow = document.createElement("div");
-    badgeRow.className = "tier-badge-row";
-    table.columns.forEach((_, i) => {
-      const cell = document.createElement("span");
-      cell.className = "tier-badge-cell";
-      if (i === recommendedIndex) cell.innerHTML = `<span class="tier-badge">✨ Could be a good fit for you</span>`;
-      badgeRow.appendChild(cell);
-    });
-    wrapper.appendChild(badgeRow);
-  }
-
   const scroller = document.createElement("div");
   scroller.className = "comparison-table-scroll";
 
+  const badgeCells = table.columns
+    .map(
+      (_, i) =>
+        `<th class="tier-badge-table-cell">${
+          i === recommendedIndex ? '<span class="tier-badge">\u2728 Could be a good fit for you</span>' : ""
+        }</th>`
+    )
+    .join("");
   const headCells = table.columns
     .map((c, i) => `<th class="${i === recommendedIndex ? "tier-recommended" : ""}">${escapeHtml(c)}</th>`)
     .join("");
@@ -1609,7 +1605,10 @@ function renderTierComparisonTable(wrapper, table) {
 
   scroller.innerHTML = `
     <table class="comparison-table comparison-table-detail">
-      <thead><tr><th></th>${headCells}</tr></thead>
+      <thead>
+        ${recommendedIndex != null ? `<tr class="tier-badge-table-row"><th></th>${badgeCells}</tr>` : ""}
+        <tr><th></th>${headCells}</tr>
+      </thead>
       <tbody>${bodyRows}</tbody>
     </table>
   `;

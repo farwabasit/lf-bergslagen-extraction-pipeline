@@ -1441,22 +1441,17 @@ body.sidebar-collapsed #sidebar-show-btn {
   color: white;
 }
 
-.tier-badge-row {
-  display: flex;
+.comparison-table-detail .tier-badge-table-row th {
+  background: transparent;
+  border: 0;
+  padding: 0 6px 4px;
+  text-align: center;
+  vertical-align: bottom;
 }
 
-.tier-badge-cell {
-  flex: 1;
+.comparison-table-detail .tier-badge-table-row .tier-badge-table-cell {
   min-width: 160px;
-  padding-left: 14px;
 }
-
-.tier-badge-cell:first-child {
-  flex: 0 0 auto;
-  width: 0;
-  padding-left: 0;
-}
-
 .tier-badge {
   display: inline-block;
   background: var(--lf-green);
