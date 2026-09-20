@@ -205,6 +205,27 @@ def fetch_lf_page(topic: str) -> str:
     return result
 
 
+def _is_personnummer_field(name: str, label: str) -> bool:
+    """True if this field is a Swedish personnummer, whatever the caller
+    happened to name it - a form_template can come from the model itself
+    (e.g. a custom insurance-specific template), which isn't guaranteed to
+    spell the field "personnummer" in lowercase the way
+    DEFAULT_CUSTOMER_FORM_FIELDS does, so this checks both name and label
+    case/diacritic-insensitively against every known alias rather than one
+    exact string."""
+    aliases = {_fold(alias) for alias in ("personnummer", "personal id number", "personal number", "ssn")}
+    return _fold(name) in aliases or _fold(label) in aliases
+
+
+def _mask_personnummer(value: str) -> str:
+    """See _is_personnummer_field's docstring and the call sites below for
+    why this must never return the number in full - GDPR/EU data-protection
+    rules treat it as sensitive personal data an AI agent has no business
+    displaying."""
+    match = re.search(r"\b(?:\d{6}|\d{8})-\d{4}\b", value)
+    return f"{match.group(0).split('-')[0]}-XXXX" if match else ""
+
+
 def fill_customer_form(extracted_text: str, form_template: dict | None = None) -> str:
     """Populate a form from realistic Swedish insurance application text.
 
@@ -280,13 +301,15 @@ def fill_customer_form(extracted_text: str, form_template: dict | None = None) -
             heading = find_heading(line, field_specs)
             if not heading:
                 continue
-            name, _label = heading
+            name, label = heading
             value = clean_value(clean_line(lines[index + 1])) if index + 1 < len(lines) else ""
+            if _is_personnummer_field(name, label):
+                value = _mask_personnummer(value)
             if value:
                 values[name] = value
             continue
         for field_index, match in enumerate(found_fields):
-            start, end, name, _label, _matched = match
+            start, end, name, label, _matched = match
             next_start = found_fields[field_index + 1][0] if field_index + 1 < len(found_fields) else len(clean_line(line))
             value = clean_value(clean_line(line)[end:next_start].strip(" ,;|"))
             if not value and field_index == 0 and index + 1 < len(lines):
@@ -294,10 +317,12 @@ def fill_customer_form(extracted_text: str, form_template: dict | None = None) -
                 if next_line and not find_fields(next_line, field_specs) and not find_heading(next_line, field_specs):
                     value = next_line
 
-            if name == "personnummer":
-                # Swedish personnummer may be written with either a two- or four-digit year.
-                personnummer = re.search(r"\b(?:\d{6}|\d{8})-\d{4}\b", value)
-                value = personnummer.group(0) if personnummer else ""
+            if _is_personnummer_field(name, label):
+                # This value never leaves this function unmasked - it's
+                # never in the reply text, the rendered form, or the case
+                # this flow later creates, regardless of what the model
+                # does with it afterward. See _is_personnummer_field.
+                value = _mask_personnummer(value)
 
             if name in {"address", "property_address"} and value and field_index == len(found_fields) - 1:
                 continuation = clean_line(lines[index + 1]) if index + 1 < len(lines) else ""

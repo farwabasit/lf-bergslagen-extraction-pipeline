@@ -448,24 +448,98 @@ def _has_identity_hint(history: list[dict]) -> bool:
     return bool(IDENTITY_HINT_RE.search(user_text) or _bankid_chosen(history))
 
 
+# Mirrors agent.py's HOME_INSURANCE_WORDS just enough to detect application
+# (not just comparison) intent for the Task Completion Ring - kept local
+# here, rather than imported from agent.py, since agent.py already imports
+# flow-detection functions FROM this module and importing the other way
+# would be circular.
+HOME_INSURANCE_WORDS = [
+    "home insurance", "hemförsäkring", "hemforsakring", "house insurance",
+    "villaförsäkring", "villaforsakring", "apartment insurance",
+]
+HOME_INSURANCE_APPLY_WORDS = [
+    "apply for", "application for", "apply", "ansöka om", "ansökan om", "ansöka",
+]
+# Fixed substrings from tools.INSURANCE_CONFIRMATION_TEXT (English/Swedish) -
+# same "exact phrase the flow always includes at its endpoint" pattern as
+# LOAN_PROMISE_RESOLVED_MARKERS above.
+HOME_INSURANCE_RESOLVED_MARKERS = (
+    "sent to an LF Bergslagen advisor",
+    "skickats till en handläggare på LF Bergslagen",
+)
+
+
+def wants_home_insurance_application(history: list[dict]) -> bool:
+    combined = " ".join(m.get("content", "") for m in history if m.get("role") == "user").lower()
+    return (
+        any(w in combined for w in HOME_INSURANCE_WORDS)
+        and any(w in combined for w in HOME_INSURANCE_APPLY_WORDS)
+    )
+
+
+def home_insurance_flow_resolved(history: list[dict]) -> bool:
+    return any(
+        m.get("role") == "assistant"
+        and any(marker in (m.get("content") or "") for marker in HOME_INSURANCE_RESOLVED_MARKERS)
+        for m in history
+    )
+
+
+def _last_user_mention_index(history: list[dict], matches: Callable[[str], bool]) -> int:
+    """Index of the last user message satisfying `matches`, or -1. Used to
+    pick whichever flow the customer mentioned MOST RECENTLY when more than
+    one applies in the same conversation (e.g. they did a Loan Promise
+    earlier, then later asked about Home Insurance) - without this, the
+    Task Completion Ring would stay stuck on whichever flow happened to be
+    checked first, even long after the customer moved on to another one."""
+    last = -1
+    for index, message in enumerate(history):
+        if message.get("role") == "user" and matches(message.get("content", "").lower()):
+            last = index
+    return last
+
+
 def compute_transition_progress(history: list[dict]) -> dict | None:
-    """Progress through whichever mortgage flow (Loan Promise or Loan Offer)
-    the customer has started, derived from the same conversation-transcript
-    signals the flows themselves already use (identity hint, attached
-    document count, resolved markers) - no separate session state needed.
-    Powers the Task Completion Ring in the chat widget. None until a flow
-    has actually been started."""
+    """Progress through whichever flow (Loan Promise, Loan Offer, or Home
+    Insurance) the customer most recently engaged with, derived from the
+    same conversation-transcript signals each flow already uses (identity
+    hint, attached document count, resolved markers) - no separate session
+    state needed. Powers the Task Completion Ring in the chat widget. None
+    until a flow has actually been started."""
+    candidates: list[tuple[int, str, int, bool]] = []
     if wants_loan_offer_application(history):
-        flow_label, documents_needed, resolved = "Loan Offer", 3, loan_offer_flow_resolved(history)
-    elif wants_loan_promise_application(history):
-        flow_label, documents_needed, resolved = "Loan Promise", 2, loan_promise_flow_resolved(history)
-    else:
+        idx = _last_user_mention_index(
+            history, lambda t: any(kw in t for kw in LOAN_OFFER_KEYWORDS) or any(term in t for term in ("loan offer", "låneerbjudande"))
+        )
+        candidates.append((idx, "Loan Offer", 3, loan_offer_flow_resolved(history)))
+    if wants_loan_promise_application(history):
+        idx = _last_user_mention_index(
+            history, lambda t: any(kw in t for kw in LOAN_PROMISE_KEYWORDS) or any(term in t for term in ("loan promise", "lånelöfte"))
+        )
+        candidates.append((idx, "Loan Promise", 2, loan_promise_flow_resolved(history)))
+    if wants_home_insurance_application(history):
+        idx = _last_user_mention_index(
+            history,
+            lambda t: any(w in t for w in HOME_INSURANCE_WORDS) and any(w in t for w in HOME_INSURANCE_APPLY_WORDS),
+        )
+        candidates.append((idx, "Home Insurance", 1, home_insurance_flow_resolved(history)))
+
+    if not candidates:
         return None
+
+    idx, flow_label, documents_needed, resolved = max(candidates, key=lambda c: c[0])
+
+    # Only count documents attached SINCE this flow was last mentioned - an
+    # earlier, different flow's documents (e.g. income/expense statements
+    # attached for a Loan Promise done earlier in the same chat) shouldn't
+    # satisfy a later, unrelated flow's own document requirement just
+    # because they're both in the same conversation history.
+    documents_since_flow_started = _extract_attached_documents(history[idx:])
 
     steps = [
         {"label": "Application started", "done": True},
         {"label": "Identity verified", "done": _has_identity_hint(history)},
-        {"label": "Documents uploaded", "done": len(_extract_attached_documents(history)) >= documents_needed},
+        {"label": "Documents uploaded", "done": len(documents_since_flow_started) >= documents_needed},
         {"label": "Request Submitted", "done": resolved},
     ]
     completed = sum(1 for step in steps if step["done"])
