@@ -1221,6 +1221,93 @@ body.sidebar-collapsed #sidebar-show-btn {
   background: var(--lf-blue-dark);
 }
 
+/* Product portfolio card grid (see addPortfolio() in app.js) - one card per
+   product, with a category icon, replacing the plain bullet-list text the
+   backend used to narrate. Same content-width convention as .msg so it
+   lines up with the rest of the conversation column. */
+.portfolio-wrapper {
+  align-self: flex-start;
+  max-width: min(760px, 90%);
+  width: 100%;
+}
+
+.portfolio-heading {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin-bottom: 8px;
+}
+
+.portfolio-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.portfolio-card {
+  background: white;
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--lf-blue);
+  border-radius: 10px;
+  padding: 12px 14px;
+  display: flex;
+  gap: 10px;
+}
+
+.portfolio-card-icon {
+  font-size: 22px;
+  line-height: 1;
+  flex: 0 0 auto;
+}
+
+.portfolio-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.portfolio-card-title {
+  font-size: 13.5px;
+  margin: 0;
+  color: var(--lf-blue-dark);
+  line-height: 1.3;
+}
+
+.portfolio-card-type {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.portfolio-card-size {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-main);
+  margin: 0;
+}
+
+.portfolio-card-details {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 3px 10px;
+  margin: 6px 0 0;
+  font-size: 11.5px;
+}
+
+.portfolio-card-details dt {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.portfolio-card-details dd {
+  margin: 0;
+  font-weight: 600;
+  text-align: right;
+}
+
 /* Comparison table (e.g. car insurance tiers) - real, structured data
    rendered by addComparisonTable() in app.js, not typed out by the LLM.
    Same content-width convention as .msg/.suggestions so it lines up with

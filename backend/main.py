@@ -274,6 +274,20 @@ def chat(req: ChatRequest) -> dict:
         # message - independent of whether an NBA offer happens to fire.
         extra["verified_customer_id"] = customer_id
 
+        # Portfolio lookup is the one flow where offers should show
+        # immediately alongside the result, not just at a conversation's
+        # closing moment (see the general NBA rule below) - she's already
+        # looking at her products, which is exactly the context an offer
+        # needs. extra["portfolio"] only appears on the exact turn
+        # agent.py's deterministic flow returns the structured product list
+        # (see PORTFOLIO_RESULT_TEXT), so this can't double-fire on a later,
+        # unrelated turn in the same chat.
+        if extra.get("portfolio"):
+            offers = nba_engine.get_offers_for_customer(customer_id, topic)
+            if offers:
+                extra["offers"] = offers
+                extra["offers_customer_id"] = customer_id
+
     # Next Best Action offers: the customer must have been identity-verified
     # at some point in this chat (this turn or an earlier one - see
     # db.verified_customer_id) AND the conversation must be at its closing
@@ -288,6 +302,7 @@ def chat(req: ChatRequest) -> dict:
     verified_customer_id = db.get_chat_verified_customer(req.session_id) if req.session_id else None
     if (
         verified_customer_id
+        and "offers" not in extra  # the portfolio flow above may already have set these
         and _is_closing_decline(history)
         and topic not in ("fraud_report", "transaction_dispute")
     ):
@@ -302,6 +317,7 @@ def chat(req: ChatRequest) -> dict:
         "suggestions": suggestions,
         "plan_updates": completed_plan_tasks,
         "case_id": case_id,
+        "topic": topic,
         **extra,
     }
 
@@ -371,6 +387,18 @@ def request_human(session_id: str) -> dict:
     ]
     first_user_msg = next((m["content"] for m in transcript if m["role"] == "user"), "")
     customer_summary = first_user_msg[:80] if first_user_msg else "Customer chat"
+    if not transcript:
+        # cs-service's CreateChatRequestRequest requires a non-empty
+        # transcript (@NotEmpty) and rejects an empty one with a 400 that
+        # notify_chat_request's retries can never recover from (a retry
+        # just resends the same empty list). This is a real, reachable
+        # case, not just a hypothetical: "Contact us" is always visible in
+        # the topbar, so a customer can click it before typing anything at
+        # all, and - before the frontend's own race-closing fix - could
+        # also click it in the narrow window while her first message was
+        # still being saved. Either way, send a placeholder line instead of
+        # nothing so the hand-off always actually reaches the CS team.
+        transcript = [{"role": "user", "content": "(Customer requested a human before sending a message.)"}]
     notified = cs_client.notify_chat_request(session_id, customer_summary, transcript)
 
     metrics.record_handoff(session_id, classify_topic(transcript))
@@ -486,6 +514,14 @@ def get_session(session_id: str) -> dict:
     session = sessions.get(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Unknown session")
+    # Lets the frontend know which specialist flow this chat's transcript
+    # belongs to on load/switch (not just on a live /api/chat reply) - see
+    # PLAN_IRRELEVANT_TOPICS in app.js, which keeps the "My home purchase"
+    # panel from showing up in an unrelated chat (e.g. a fraud report or a
+    # product-portfolio lookup) reopened from the sidebar.
+    session["topic"] = classify_topic(
+        [{"role": m["role"], "content": m["content"]} for m in session["messages"]]
+    )
     return session
 
 

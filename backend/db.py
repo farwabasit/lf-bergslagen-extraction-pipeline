@@ -34,7 +34,7 @@ from sqlalchemy import (
     inspect,
     text,
 )
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from . import config
@@ -465,7 +465,20 @@ def _ensure_chat_session(db: Session, session_id: str) -> ChatSession:
     if row is None:
         row = ChatSession(session_id=session_id)
         db.add(row)
-        db.flush()
+        try:
+            db.flush()
+        except IntegrityError:
+            # A brand-new session's very first /api/chat call and an almost-
+            # simultaneous action on the same session_id (e.g. clicking
+            # "Contact us" right away) can both see "not found" here before
+            # either has committed, and both try to INSERT - a classic
+            # check-then-insert race, not a real conflict. The loser just
+            # re-fetches the row the winner already created instead of
+            # surfacing an IntegrityError as a 500 to the customer.
+            db.rollback()
+            row = db.get(ChatSession, session_id)
+            if row is None:
+                raise
     return row
 
 
