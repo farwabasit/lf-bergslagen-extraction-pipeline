@@ -128,31 +128,12 @@ re-display the form and do not ask for confirmation again. Instead call
 submit_insurance_application with the product name - this actually creates a case
 a real advisor will see, so never skip it and never claim the application is
 "ready for review" without having called it: that would be a promise nothing
-behind it. Once it returns a case ID, reply in the user's
-current language confirming the case was created, stating that ID VERBATIM
-(never invent, reformat, or omit it), and explain the real next steps in short,
-numbered form (an advisor will review it and reach out; there's no fixed email
-timeline to promise since this app doesn't send one). Then ask whether they have
-more questions or want to add products such as life insurance or condominium add-on
-coverage. Use this structure, adapting the product/insurance type and case ID:
-
-Swedish:
-"Tack! Din ansökan om [produkt] har skapats som ärende [case_id] och skickats till
-en handläggare på LF Bergslagen. Här är vad som händer härnäst:
-1) En handläggare går igenom uppgifterna och kontaktar dig
-2) Försäkringen aktiveras från önskat startdatum om allt stämmer
-
-Har du några fler frågor om försäkringen, eller vill du lägga till andra produkter
-som livförsäkring eller bostadsrättstillägg?"
-
-English:
-"Thank you! Your [product] application has been created as case [case_id] and
-sent to an LF Bergslagen advisor. Here's what happens next:
-1) An advisor will review it and reach out to you directly
-2) The insurance activates from your requested start date if everything checks out
-
-Do you have any other questions about the insurance, or would you like to add
-other products like life insurance or condominium add-on coverage?"
+behind it. It returns the complete final reply text, already composed in the
+correct language with the real case ID filled in - your entire reply this turn
+must be EXACTLY that returned text, verbatim, with nothing added, removed, or
+translated. (This is deliberate: asked to compose or adapt this confirmation
+itself, the model has previously blended Swedish and English together in one
+reply, which the fixed returned text avoids entirely.)
 2. If the user requests a correction, such as changing their phone number or fixing
 the address, update only the specified field(s), show only the corrected value(s),
 and ask them to confirm the update. Do not re-display the entire form.
@@ -1317,6 +1298,12 @@ def _run_agent(
     seen_urls: set[str] = set()
     comparison_table: dict | None = None
     filled_form: dict | None = None
+    # Safety net for submit_insurance_application's returned confirmation
+    # text (see its docstring): tool_choice is "auto", so nothing actually
+    # forces the model to relay that text verbatim rather than composing its
+    # own - if it ever does compose its own anyway, this overrides it with
+    # the real, deterministic, single-language text instead.
+    insurance_confirmation_text: str | None = None
 
     for round_index in range(MAX_TOOL_ROUNDS):
         # The model isn't reliably grounding itself on its own - it sometimes
@@ -1353,7 +1340,7 @@ def _run_agent(
         messages.append(assistant_msg)
 
         if not tool_calls:
-            reply = _strip_unverified_links(choice.content or "", seen_urls)
+            reply = insurance_confirmation_text or _strip_unverified_links(choice.content or "", seen_urls)
             last_user_message = next(
                 (m.get("content", "") for m in reversed(history) if m.get("role") == "user"), ""
             )
@@ -1378,7 +1365,8 @@ def _run_agent(
                 except json.JSONDecodeError:
                     filled_form = None
             elif name == "submit_insurance_application":
-                result = submit_insurance_application(history, args.get("product", "insurance"))
+                result = submit_insurance_application(history, args.get("product", "insurance"), lang)
+                insurance_confirmation_text = result
             elif name == "find_service_provider":
                 result = find_service_provider(
                     args.get("category", ""), args.get("location", "")

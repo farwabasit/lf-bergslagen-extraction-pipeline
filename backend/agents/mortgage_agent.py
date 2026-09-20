@@ -30,6 +30,7 @@ from ..knowledge import LF_PAGES, MOCK_CUSTOMERS
 from ..link_safety import URL_RE, strip_unverified_links
 from ..llm_client import client
 from ..suggestions import generate_suggestions
+from ..text_utils import strip_attachments
 from ..tools import fetch_lf_page, verify_customer_by_personnummer, verify_customer_identity
 from . import credit_agent, document_agent, loan_calc
 
@@ -246,8 +247,13 @@ def _user_texts_joined(history: list[dict]) -> str:
 
 
 def _bankid_chosen(history: list[dict]) -> bool:
+    # strip_attachments first - otherwise an uploaded document that happens
+    # to mention "BankID" anywhere in its own text (common boilerplate in
+    # real Swedish forms, e.g. a digital-signing clause) would look
+    # identical to the customer actually having clicked "Authenticate with
+    # BankID", letting a document bypass identity verification entirely.
     return any(
-        BANKID_KEYWORD in (m.get("content", "") or "").lower()
+        BANKID_KEYWORD in strip_attachments(m.get("content", "") or "").lower()
         for m in history if m.get("role") == "user"
     )
 

@@ -360,7 +360,47 @@ def fill_customer_form(extracted_text: str, form_template: dict | None = None) -
     return json.dumps({**template, "fields": populated_fields}, ensure_ascii=False)
 
 
-def submit_insurance_application(history: list[dict], product: str) -> str:
+# Guards submit_insurance_application against being called before a real
+# form was ever shown and confirmed - tool_choice is "auto", so nothing
+# stops the model from skipping straight from "I want to apply for X" to
+# this tool, which (with no real filled-form text to re-derive fields from)
+# would otherwise create a case for "Unknown" with no actual applicant
+# details behind it. Same "verify, don't trust the model's own judgment"
+# reasoning as the rest of this app's deterministic gates.
+INSURANCE_MISSING_DETAILS_TEXT = {
+    "en": (
+        "I don't have your details yet, so I can't submit this application - please "
+        "attach a document with your information (or tell me your full name and address) "
+        "first, and confirm the filled-in details, before I can create the case."
+    ),
+    "sv": (
+        "Jag har inte dina uppgifter än, så jag kan inte skicka in den här ansökan - bifoga "
+        "först ett dokument med dina uppgifter (eller berätta ditt fullständiga namn och din "
+        "adress) och bekräfta de ifyllda uppgifterna innan jag kan skapa ärendet."
+    ),
+}
+
+INSURANCE_CONFIRMATION_TEXT = {
+    "en": (
+        "Thank you! Your {product} application has been created as case {case_id} and "
+        "sent to an LF Bergslagen advisor. Here's what happens next:\n"
+        "1) An advisor will review it and reach out to you directly\n"
+        "2) The insurance activates from your requested start date if everything checks out\n\n"
+        "Do you have any other questions about the insurance, or would you like to add "
+        "other products like life insurance or condominium add-on coverage?"
+    ),
+    "sv": (
+        "Tack! Din ansökan om {product} har skapats som ärende {case_id} och skickats till "
+        "en handläggare på LF Bergslagen. Här är vad som händer härnäst:\n"
+        "1) En handläggare går igenom uppgifterna och kontaktar dig\n"
+        "2) Försäkringen aktiveras från önskat startdatum om allt stämmer\n\n"
+        "Har du några fler frågor om försäkringen, eller vill du lägga till andra produkter "
+        "som livförsäkring eller bostadsrättstillägg?"
+    ),
+}
+
+
+def submit_insurance_application(history: list[dict], product: str, lang: str | None = None) -> str:
     """The FORM FILLING flow's actual submission step - called once the
     customer confirms a form fill_customer_form produced. Creates a REAL
     cs-service case (visible in the CS Workspace queue, assignable to an
@@ -381,9 +421,14 @@ def submit_insurance_application(history: list[dict], product: str) -> str:
     "Label: value" lines it always renders in, so parsing it back is exactly
     as reliable as parsing an uploaded document was.
 
-    Returns the real case ID - the caller should state it verbatim in its
-    reply so it round-trips through CASE_ID_RE in main.py, the same way
-    every other case-creating flow in this app is picked up."""
+    Returns the full, final customer-facing confirmation message, already
+    composed deterministically in one single language via
+    INSURANCE_CONFIRMATION_TEXT (never left for the model to write/translate
+    itself, which - shown a Swedish and an English example template to
+    "adapt" - proved able to freely blend both languages in one reply). The
+    caller must relay this text verbatim, unchanged. Includes the real case
+    ID so it round-trips through CASE_ID_RE in main.py, the same way every
+    other case-creating flow in this app is picked up."""
     last_form_text = next(
         (m.get("content", "") for m in reversed(history) if m.get("role") == "assistant"), ""
     )
@@ -392,7 +437,11 @@ def submit_insurance_application(history: list[dict], product: str) -> str:
     except (json.JSONDecodeError, TypeError):
         fields = []
     values = {f.get("name", ""): f.get("value", "") for f in fields if f.get("value")}
-    full_name = values.get("full_name") or values.get("name") or "Unknown"
+    full_name = values.get("full_name") or values.get("name")
+    has_address = bool(values.get("address") or values.get("street"))
+    if not full_name or not has_address:
+        key = "sv" if lang == "sv" else "en"
+        return INSURANCE_MISSING_DETAILS_TEXT[key]
 
     reason = f"{product} application submitted by customer via chat. " + "; ".join(
         f"{f.get('label', f.get('name', ''))}: {f.get('value', '')}" for f in fields if f.get("value")
@@ -400,7 +449,8 @@ def submit_insurance_application(history: list[dict], product: str) -> str:
     case_id, status = cs_client.create_case_with_fallback(
         "other", full_name, None, reason, {"product": product, **values},
     )
-    return f"Case created: {case_id} (status: {status})"
+    key = "sv" if lang == "sv" else "en"
+    return INSURANCE_CONFIRMATION_TEXT[key].format(product=product, case_id=case_id)
 
 
 # Real, live comparison table on LF's car insurance page (Helförsäkring /
