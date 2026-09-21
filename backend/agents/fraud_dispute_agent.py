@@ -17,7 +17,9 @@ agent (see backend/audit.py)."""
 import re
 
 from .. import audit, cs_client, verified_customer
-from ..knowledge import MOCK_CUSTOMERS
+from ..tools import verify_customer_by_personnummer
+from .mortgage_agent import AUTH_CHOICE_FORM, AUTH_CHOICE_SUGGESTIONS, BANKID_DEMO_PERSONNUMMER
+from .mortgage_agent import _bankid_chosen as bankid_chosen
 
 FRAUD_KEYWORDS = [
     "report fraud", "reporting fraud", "i want to report fraud", "it's fraud",
@@ -36,7 +38,6 @@ RESOLVED_MARKERS = ("Case ID:", "Ärende-ID:")
 TRANSACTIONS_SHOWN_MARKERS = ("most recent transactions", "senaste transaktioner")
 FORM_MARKERS = ("a few quick details", "några snabba detaljer")
 
-PNR_RE = re.compile(r"\d{6,8}[-\s]?\d{4}")
 TXN_ID_RE = re.compile(r"TXN-\d{4}-\d{2}", re.IGNORECASE)
 # The transaction-select form (below) composes its answer as "Selected
 # transactions: TXN-..., TXN-..."; this narrows matching to just that list
@@ -68,30 +69,17 @@ def _last_user_message(history: list[dict]) -> str:
     return next((m.get("content", "") for m in reversed(history) if m.get("role") == "user"), "")
 
 
-def _all_user_text(history: list[dict]) -> str:
-    return " ".join(m.get("content", "") for m in history if m.get("role") == "user")
-
-
 def _resolve_customer(history: list[dict]) -> dict | None:
-    """Deterministically re-derives which (mock) customer this is from the
-    raw conversation text - personnummer digits must match exactly, and the
-    customer's name must appear somewhere in the conversation too. Recomputed
-    fresh every turn, so there's nothing to "forget" between turns."""
-    combined = _all_user_text(history)
-    pnr_match = PNR_RE.search(combined)
-    if not pnr_match:
+    """BankID-verified customer for this flow - same deterministic gate as
+    the mortgage/portfolio flows (see mortgage_agent._bankid_chosen and
+    tools.verify_customer_by_personnummer), not typed personnummer/date of
+    birth: reporting fraud or disputing a transaction touches a real
+    customer's account just as much as those do, so it gets the same real
+    identity check rather than a manual-entry form. Recomputed fresh every
+    turn from the raw conversation text - nothing to "forget" between turns."""
+    if not bankid_chosen(history):
         return None
-    pnr_digits = re.sub(r"\D", "", pnr_match.group(0))
-
-    combined_lower = combined.lower()
-    for customer in MOCK_CUSTOMERS:
-        record_digits = re.sub(r"\D", "", customer["personnummer"])
-        if pnr_digits != record_digits:
-            continue
-        name_parts = customer["name"].lower().split()
-        if any(part in combined_lower for part in name_parts):
-            return customer
-    return None
+    return verify_customer_by_personnummer(BANKID_DEMO_PERSONNUMMER)
 
 
 def _transactions_already_shown(history: list[dict]) -> bool:
@@ -156,30 +144,11 @@ def _parse_form_answers(history: list[dict]) -> dict | None:
     }
 
 
-# Shown instead of "fill in the blank" suggestion chips - those looked like
-# real options but were actually templates the customer needed to complete
-# ("My name is...", clicked, sent literally as-is, which obviously never
-# verifies). A form with real input fields is the honest version of that:
-# the customer visibly fills in their own values before anything is sent.
-IDENTITY_FORM = {
-    "type": "identity_details",
-    "fields": [
-        {"name": "full_name", "label": "Full name", "type": "text", "placeholder": "e.g. Anna Andersson"},
-        {"name": "personnummer", "label": "Personnummer", "type": "text", "placeholder": "YYYYMMDD-XXXX"},
-        {"name": "dob", "label": "Date of birth", "type": "text", "placeholder": "YYYY-MM-DD"},
-    ],
-}
-
-
 TEXT = {
     "en": {
         "ask_identity": (
-            "I hear you on that - I just need to verify your identity first. Could you "
-            "give me your full name, personnummer, and date of birth?"
-        ),
-        "not_verified": (
-            "I couldn't verify your identity with those details. Could you double-check "
-            "your name and personnummer? A typo in the personnummer is the most common cause."
+            "I hear you on that - since this touches your actual account, I first need "
+            "to verify your identity via BankID."
         ),
         "txn_intro": (
             "Thanks, {name} - I've verified your identity. Here are your 10 most recent "
@@ -219,12 +188,8 @@ TEXT = {
     },
     "sv": {
         "ask_identity": (
-            "Jag förstår - jag behöver bara verifiera din identitet först. Kan du ge mig "
-            "ditt fullständiga namn, personnummer och födelsedatum?"
-        ),
-        "not_verified": (
-            "Jag kunde inte verifiera din identitet med de uppgifterna. Kan du dubbelkolla "
-            "namn och personnummer? Ett skrivfel i personnumret är den vanligaste orsaken."
+            "Jag förstår - eftersom det här rör ditt faktiska konto behöver jag först "
+            "verifiera din identitet via BankID."
         ),
         "txn_intro": (
             "Tack, {name} - jag har verifierat din identitet. Här är dina 10 senaste "
@@ -300,14 +265,7 @@ def run_fraud_dispute_agent(history: list[dict], lang: str | None, case_type: st
     customer = _resolve_customer(history)
 
     if customer is None:
-        pnr_present = bool(PNR_RE.search(_all_user_text(history)))
-        if not pnr_present:
-            return t["ask_identity"], [], {"form": IDENTITY_FORM}
-        audit.record_event(
-            agent="fraud_dispute_agent", action="verify_identity", customer_id=None,
-            decision="NOT_VERIFIED", details={"case_type": case_type},
-        )
-        return t["not_verified"], [], {"form": IDENTITY_FORM}
+        return t["ask_identity"], AUTH_CHOICE_SUGGESTIONS[key], {"form": AUTH_CHOICE_FORM}
 
     if not _transactions_already_shown(history):
         verified_customer.mark_verified(customer["customer_id"])
