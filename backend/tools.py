@@ -51,7 +51,7 @@ DEFAULT_CUSTOMER_FORM_FIELDS = (
     ("bostadsyta", "Living area (sqm)", ("Bostadsyta", "Living area (sqm)", "Living area", "Area", "bostadsyta")),
     ("antal_rum", "Number of rooms", ("Antal rum", "Number of rooms", "Rooms", "antal_rum")),
     ("byggnadsar", "Year built", ("Byggnadsår", "Year built", "Year of construction", "byggnadsar")),
-    ("bostadens_varde", "Property value", ("Bostadens värde", "Value of movable property (SEK)", "Value", "bostadens_varde")),
+    ("bostadens_varde", "Value of movable property", ("Bostadens värde (lösöre)", "Bostadens värde", "Value of movable property", "Value of movable property (SEK)", "Value", "bostadens_varde")),
     ("forsakringstyp", "Insurance type", ("Försäkringstyp", "Type of insurance", "Insurance type", "forsakringstyp")),
     ("onskat_tillagg_1", "Additional cover 1", ("Önskat tillägg 1", "Additional all-risk for movable property", "Additional cover 1", "onskat_tillagg_1")),
     ("onskat_tillagg_2", "Additional cover 2", ("Önskat tillägg 2", "Additional extended travel protection", "Additional cover 2", "onskat_tillagg_2")),
@@ -216,16 +216,9 @@ def fill_customer_form(extracted_text: str, form_template: dict | None = None, l
         name: (label, aliases)
         for name, label, aliases in DEFAULT_CUSTOMER_FORM_FIELDS
     }
-    template = form_template or {
-        "type": "customer_details",
-        "title": "Customer details from uploaded document",
-        "fields": [
-            {"name": name, "label": label, "type": "text"}
-            for name, (label, _aliases) in default_fields.items()
-        ],
-    }
+    template = _build_form_template(form_template)
 
-    lines = (extracted_text or "").splitlines()
+    lines = _number_unnumbered_covers((extracted_text or "").splitlines())
 
     def clean_line(line: str) -> str:
         # Accept Markdown bullets/headings without letting their markers become field values.
@@ -282,6 +275,8 @@ def fill_customer_form(extracted_text: str, form_template: dict | None = None, l
                 continue
             name, label = heading
             value = clean_value(clean_line(lines[index + 1])) if index + 1 < len(lines) else ""
+            if is_personnummer_field(name, label):
+                value = _normalize_personnummer(value)
             if value:
                 values[name] = value
             continue
@@ -291,12 +286,30 @@ def fill_customer_form(extracted_text: str, form_template: dict | None = None, l
             value = clean_value(clean_line(line)[end:next_start].strip(" ,;|"))
             if not value and field_index == 0 and index + 1 < len(lines):
                 next_line = clean_line(lines[index + 1])
-                if next_line and not find_fields(next_line, field_specs) and not find_heading(next_line, field_specs):
+                if (
+                    next_line
+                    and not find_fields(next_line, field_specs)
+                    and not find_heading(next_line, field_specs)
+                    and not _is_labelled_line(next_line)
+                ):
                     value = next_line
+
+            if is_personnummer_field(name, label):
+                value = _normalize_personnummer(value)
 
             if name in {"address", "property_address"} and value and field_index == len(found_fields) - 1:
                 continuation = clean_line(lines[index + 1]) if index + 1 < len(lines) else ""
-                if continuation and not find_fields(continuation, field_specs) and not find_heading(continuation, field_specs):
+                # _is_labelled_line checks every known field alias, not just
+                # this template's fields - a model-built template that lacks a
+                # recognizable postcode field (e.g. "Postal code" for a
+                # document's "Postnummer:") would otherwise let that whole
+                # "Postnummer: 722 12" line get glued onto the address.
+                if (
+                    continuation
+                    and not find_fields(continuation, field_specs)
+                    and not find_heading(continuation, field_specs)
+                    and not _is_labelled_line(continuation)
+                ):
                     if re.search(r"\b\d{3}\s?\d{2}\b", continuation) or len(continuation) <= 80:
                         value = f"{value}, {continuation}"
             if value:
@@ -328,17 +341,45 @@ def fill_customer_form(extracted_text: str, form_template: dict | None = None, l
             address_components["postcode"] = postcode_match.group(0)
             break
 
-    for name, value in address_components.items():
-        if name in values and not values[name]:
-            values[name] = value
-    values["address"] = ", ".join(
-        value for value in (
-            address_components["street"],
-            address_components["postcode"],
-            address_components["municipality"],
-            address_components["city"],
-        ) if value
-    )
+    # A postcode / municipality / city that has its own field in the template
+    # is already reported there, so the address itself stays street-only -
+    # otherwise the same postcode would show up twice, once in "Postnummer"
+    # and once glued onto the address.
+    has_own_field = {
+        "postcode": "postcode" in values or "postnummer" in values,
+        "municipality": "municipality" in values,
+        "city": "city" in values or "ort" in values,
+    }
+    street = address_components["street"]
+    if has_own_field["postcode"] and address_components["postcode"]:
+        # The unlabeled-continuation path above can leave "Storgatan 1, 722 12 Västerås"
+        # as the street; cut it back to just the street part.
+        merged_postcode = postcode_pattern.search(street)
+        if merged_postcode and merged_postcode.group(0) == address_components["postcode"] and merged_postcode.start() > 0:
+            street = street[:merged_postcode.start()].strip(" ,;|") or street
+    if has_own_field["city"] and address_components["city"] and street.lower().endswith(address_components["city"].lower()):
+        street = street[: -len(address_components["city"])].strip(" ,;|") or street
+    address_components["street"] = street
+
+    # Each component can live under either its English or its Swedish field
+    # name (the canonical template uses postnummer/ort).
+    component_field_names = {
+        "street": ("street",),
+        "postcode": ("postcode", "postnummer"),
+        "municipality": ("municipality",),
+        "city": ("city", "ort"),
+    }
+    for component, value in address_components.items():
+        for field_name in component_field_names[component]:
+            if field_name in values and not values[field_name]:
+                values[field_name] = value
+    address_parts = [street]
+    for part_name in ("postcode", "municipality", "city"):
+        part = address_components[part_name]
+        # Skip a part that has its own field, or that the street already contains.
+        if part and not has_own_field[part_name] and part.lower() not in street.lower():
+            address_parts.append(part)
+    values["address"] = ", ".join(part for part in address_parts if part)
 
     populated_fields = []
     personnummer_field_seen = False
@@ -706,6 +747,153 @@ PERSONNUMMER_VERIFIED_NOTE = {
     "en": "Please note: your Personal ID number was verified via BankID and does not need to be provided again.",
     "sv": "Observera: ditt personnummer verifierades via BankID och behöver inte anges igen.",
 }
+
+
+def _normalize_personnummer(value: str) -> str:
+    """Swedish personnummer may be written with either a two- or four-digit
+    year; anything that isn't a well-formed one is dropped rather than kept
+    half-parsed."""
+    match = re.search(r"\b(?:\d{6}|\d{8})-\d{4}\b", value)
+    return match.group(0) if match else ""
+
+
+# The insurance application form's fields, owned by code rather than by
+# whatever form_template the model happens to invent for a given call - a
+# model-built template used to decide which fields got extracted at all
+# (and what they were named), so a leaner or differently-named one silently
+# dropped every housing/insurance field. name -> Swedish display label; the
+# English label comes from DEFAULT_CUSTOMER_FORM_FIELDS via _english_label.
+# The names (full_name, personnummer, address, ...) are what downstream code
+# keys on - see submit_insurance_application and app.js's addForm - so they
+# stay snake_case; only the labels are for display.
+CANONICAL_FORM_FIELDS = (
+    ("full_name", "Fullständigt namn"),
+    ("personnummer", "Personnummer"),
+    ("address", "Adress"),
+    ("postnummer", "Postnummer"),
+    ("ort", "Ort"),
+    ("phone", "Telefon"),
+    ("email", "E-post"),
+    ("boendeform", "Boendeform"),
+    ("bostadsyta", "Bostadsyta"),
+    ("antal_rum", "Antal rum"),
+    ("byggnadsar", "Byggnadsår"),
+    ("bostadens_varde", "Bostadens värde (lösöre)"),
+    ("forsakringstyp", "Försäkringstyp"),
+    ("onskat_tillagg_1", "Önskat tillägg 1"),
+    ("onskat_tillagg_2", "Önskat tillägg 2"),
+    ("forsakringen_startar", "Försäkringen önskas starta"),
+)
+
+# Default fields that only exist to split an address into parts the canonical
+# "address" / "postnummer" / "ort" trio already covers.
+_ADDRESS_PART_DEFAULT_NAMES = {"street", "postcode", "city"}
+
+
+def _form_field_key(text: str) -> str:
+    """Loose comparison key for a field name/label: accent- and
+    case-insensitive, with a "(...)" qualifier and a trailing number dropped."""
+    return _fold(_strip_trailing_number(re.sub(r"\s*\([^)]*\)", "", text.replace("_", " ")))).strip()
+
+
+_DEFAULT_ALIASES_BY_NAME = {name: aliases for name, _label, aliases in DEFAULT_CUSTOMER_FORM_FIELDS}
+_CANONICAL_EXACT_KEYS: dict[str, str] = {}
+_CANONICAL_LOOSE_KEYS: dict[str, str] = {}
+for _name, _sv_label in CANONICAL_FORM_FIELDS:
+    for _alias in (*_DEFAULT_ALIASES_BY_NAME.get(_name, ()), _name, _name.replace("_", " "), _sv_label):
+        _CANONICAL_EXACT_KEYS.setdefault(_fold(_alias), _name)
+        _CANONICAL_LOOSE_KEYS.setdefault(_form_field_key(_alias), _name)
+
+
+def _canonical_name_for(name: str, label: str) -> str | None:
+    """The canonical field a model-supplied name/label refers to, if any -
+    exact (numbered) match first so "Önskat tillägg 2" stays cover 2, then
+    the loose key so "Postcode" / "Bostadens värde" still find theirs."""
+    for text in (name, label):
+        if _fold(text) in _CANONICAL_EXACT_KEYS:
+            return _CANONICAL_EXACT_KEYS[_fold(text)]
+    for text in (name, label):
+        if _form_field_key(text) in _CANONICAL_LOOSE_KEYS:
+            return _CANONICAL_LOOSE_KEYS[_form_field_key(text)]
+    return None
+
+
+def _build_form_template(form_template: dict | None) -> dict:
+    """Canonical form fields first, then only the extra fields the model's
+    template adds beyond them (a model field that maps onto a canonical one is
+    dropped - the canonical name/label wins). With no template, the old
+    default extras (employer, loan amount, ...) are kept as the extras.
+    The type is always customer_details, which is what makes app.js hide the
+    personnummer input in favour of the BankID note."""
+    fields = [{"name": name, "label": label, "type": "text"} for name, label in CANONICAL_FORM_FIELDS]
+    taken = {name for name, _label in CANONICAL_FORM_FIELDS}
+
+    if form_template and form_template.get("fields"):
+        extras = [
+            field for field in form_template["fields"]
+            if _canonical_name_for(str(field.get("name", "")), str(field.get("label", ""))) is None
+        ]
+    else:
+        extras = [
+            {"name": name, "label": label, "type": "text"}
+            for name, label, _aliases in DEFAULT_CUSTOMER_FORM_FIELDS
+            if name not in taken and name not in _ADDRESS_PART_DEFAULT_NAMES
+        ]
+
+    for extra in extras:
+        extra_name = str(extra.get("name", "field"))
+        if extra_name not in taken:
+            taken.add(extra_name)
+            fields.append(extra)
+
+    template = dict(form_template or {})
+    template["type"] = "customer_details"
+    template["title"] = template.get("title") or "Customer details from uploaded document"
+    template["fields"] = fields
+    return template
+
+
+_UNNUMBERED_COVER_RE = re.compile(
+    r"^(?P<prefix>\s*(?:[-*•]\s+|#+\s*)?(?:\*\*)?)(?P<label>[Öö]nskat till[äaÄA]gg|Additional cover)(?P<suffix>(?:\*\*)?\s*[:=-])"
+)
+_NUMBERED_COVER_RE = re.compile(r"(?:[Öö]nskat till[äaÄA]gg|Additional cover)\s*[12]\b")
+
+
+def _number_unnumbered_covers(lines: list[str]) -> list[str]:
+    """A document that lists two "Önskat tillägg:" lines (no 1/2) should fill
+    "Önskat tillägg 1" and "Önskat tillägg 2" in order of appearance - the
+    field aliases are numbered, so as written neither would match."""
+    if any(_NUMBERED_COVER_RE.search(line) for line in lines):
+        return lines
+    numbered = []
+    count = 0
+    for line in lines:
+        match = _UNNUMBERED_COVER_RE.match(line)
+        if match and count < 2:
+            count += 1
+            line = f"{match['prefix']}{match['label']} {count}{line[match.end('label'):]}"
+        numbered.append(line)
+    return numbered
+
+
+def _known_label_pattern() -> re.Pattern:
+    labels = {
+        _fold(alias)
+        for _name, _label, aliases in DEFAULT_CUSTOMER_FORM_FIELDS
+        for alias in aliases
+    } | {_fold(label) for _name, label in CANONICAL_FORM_FIELDS}
+    alternatives = "|".join(re.escape(label) for label in sorted(labels, key=len, reverse=True))
+    return re.compile(rf"(?:\*\*)?(?:{alternatives})(?:\s*\([^)]*\))?(?:\*\*)?\s*[:=]", re.IGNORECASE)
+
+
+_KNOWN_LABEL_RE = _known_label_pattern()
+
+
+def _is_labelled_line(line: str) -> bool:
+    """True if this line starts with any known field label followed by a
+    colon ("Postnummer: 722 12"), whether or not the current template has
+    a field for it."""
+    return bool(_KNOWN_LABEL_RE.match(_fold(re.sub(r"^\s*(?:[-*•]\s+|#+\s*)", "", line))))
 
 
 def _in_lf_bergslagen_area(location: str) -> bool:

@@ -1240,6 +1240,58 @@ function addTransactionSelectForm(form) {
   messagesEl.scrollTop = messagesEl.scrollHeight;
 }
 
+// True for the values a form field can hold when nothing was filled in.
+function isEmptyFormValue(value) {
+  if (value === null || value === undefined) return true;
+  const text = String(value).trim();
+  return text === "" || text === "—";
+}
+
+// The backend strips the personnummer field before the model sees a
+// document-filled form (BankID already verified it - see agent.py), so the
+// model's bulleted list of extracted fields never has that line. Add it back
+// for display, in field order: right after the closest preceding field that
+// the reply lists, copying that line's bullet/bold style. Display-only - the
+// stored history and every regex on the reply keep working on the original text.
+function withBankIdPersonnummerLine(content, form) {
+  if (!content || !form || form.type !== "customer_details" || !Array.isArray(form.fields)) return content;
+  const idIndex = form.fields.findIndex((f) => f.name === "personnummer");
+  if (idIndex === -1) return content;
+
+  const escapeRe = (text) => String(text).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // "- **Label:** value", "- **Label**: value", "* Label: value" or a plain "Label: value".
+  const labelLineRe = (labelPattern) =>
+    new RegExp(`^\\s*(?:[-*]\\s+)?(?:\\*\\*)?(?:${labelPattern})\\s*(?:\\*\\*)?\\s*:`, "i");
+
+  const lines = content.split("\n");
+  if (lines.some((l) => labelLineRe("personnummer|personal id number").test(l))) return content;
+
+  const findLine = (field) => (field.label ? lines.findIndex((l) => labelLineRe(escapeRe(field.label)).test(l)) : -1);
+
+  let anchor = -1;
+  let insertAt = -1;
+  for (let i = idIndex - 1; i >= 0 && anchor === -1; i--) {
+    anchor = findLine(form.fields[i]);
+    insertAt = anchor + 1;
+  }
+  for (let i = idIndex + 1; i < form.fields.length && anchor === -1; i++) {
+    anchor = findLine(form.fields[i]);
+    insertAt = anchor;
+  }
+  if (anchor === -1) return content;
+
+  const label = currentLang === "sv" ? "Personnummer" : "Personal ID number";
+  const value = currentLang === "sv" ? "Verifierat via BankID" : "Verified via BankID";
+  const anchorLine = lines[anchor];
+  const prefix = anchorLine.match(/^\s*(?:[-*]\s+)?/)[0];
+  let text = `${label}: ${value}`;
+  if (/\*\*[^*\n]*:\*\*/.test(anchorLine)) text = `**${label}:** ${value}`;
+  else if (anchorLine.includes("**")) text = `**${label}**: ${value}`;
+
+  lines.splice(insertAt, 0, prefix + text);
+  return lines.join("\n");
+}
+
 function addForm(form) {
   if (!form || !form.fields || !form.fields.length) return;
 
@@ -1342,6 +1394,10 @@ function addForm(form) {
   function renderSummary() {
     fieldsContainer.innerHTML = "";
     for (const field of form.fields) {
+      // The read-only card only lists what the customer actually gave; the
+      // BankID-verified personnummer row below is always shown.
+      const isBankIdPersonnummer = hidesPersonnummer && field.name === "personnummer";
+      if (!isBankIdPersonnummer && isEmptyFormValue(values[field.name])) continue;
       const row = document.createElement("div");
       row.className = "inline-form-summary-row";
       const label = document.createElement("span");
@@ -1349,7 +1405,7 @@ function addForm(form) {
       label.textContent = field.label;
       const value = document.createElement("span");
       value.className = "inline-form-summary-value";
-      if (hidesPersonnummer && field.name === "personnummer") {
+      if (isBankIdPersonnummer) {
         label.textContent = currentLang === "sv" ? "Personnummer" : "Personal ID number";
         value.textContent = currentLang === "sv" ? "Verifierat via BankID" : "Verified via BankID";
         row.append(label, value);
@@ -1871,8 +1927,9 @@ async function getAssistantReply() {
     labelText.textContent = t().aiLabel;
     labelEl.appendChild(labelText);
     pending.appendChild(labelEl);
-    pending.insertAdjacentHTML("beforeend", renderMarkdown(data.content));
-    addSpeakButton(labelEl, data.content);
+    const displayContent = withBankIdPersonnummerLine(data.content, data.form);
+    pending.insertAdjacentHTML("beforeend", renderMarkdown(displayContent));
+    addSpeakButton(labelEl, displayContent);
     pending.className = "msg assistant";
     history.push({ role: "assistant", content: data.content });
     currentTopic = data.topic || currentTopic;

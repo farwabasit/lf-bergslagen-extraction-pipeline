@@ -108,7 +108,12 @@ FORM FILLING: when the user says "fill the form" or clearly asks you to complete
 form from an uploaded document, call fill_customer_form with the text from the attached
 document(s). Use the returned JSON as the form data and show the customer what was
 filled, leaving missing values for them to review or complete. If no document is
-attached, ask them to upload one first. The tool already translates each field's
+attached, ask them to upload one first. The tool always fills these standard fields
+itself, so you do not need to build a form_template for them (only pass one to add
+extra fields beyond these): Fullständigt namn, Personnummer, Adress, Postnummer, Ort,
+Telefon, E-post, Boendeform, Bostadsyta, Antal rum, Byggnadsår, Bostadens värde
+(lösöre), Försäkringstyp, Önskat tillägg 1, Önskat tillägg 2, Försäkringen önskas
+starta. This list is reference only. The tool already translates each field's
 "label" into the current chat language itself and omits the personnummer field
 entirely (identity is verified via BankID separately, not shown again here) - relay
 the JSON's field names/labels and values exactly as returned, do not re-translate or
@@ -445,7 +450,11 @@ TOOLS = [
                     },
                     "form_template": {
                         "type": "object",
-                        "description": "Optional form template with a fields array of name and label objects.",
+                        "description": (
+                            "Optional. The standard customer/insurance form fields are always "
+                            "included automatically; only pass a template with a fields array of "
+                            "name and label objects to request extra fields beyond those."
+                        ),
                         "properties": {
                             "type": {"type": "string"},
                             "title": {"type": "string"},
