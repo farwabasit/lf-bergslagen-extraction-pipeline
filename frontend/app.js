@@ -525,6 +525,19 @@ function escapeHtml(str) {
     .replace(/"/g, "&quot;");
 }
 
+// Display-only masking for a Swedish personnummer: keeps the first 8 digits
+// (or 6 in the 10-digit form) and replaces the last 4 with ****. Never use on
+// a stored/submitted value, the CS worker page or anything sent to the backend.
+// (The editable personnummer input shows it only while unfocused -- see addForm.)
+// A 12-digit number matches with or without a separator; a 10-digit number
+// only when it has a hyphen/space, so an unseparated run like 0701234567 (a
+// phone number) is left alone. \b stops it matching inside longer digit runs.
+// `stars` lets HTML callers pass "&#42;..." so the mask can't be read as **bold**.
+function maskPersonnummer(value, stars = "****") {
+  if (!value) return value;
+  return String(value).replace(/\b(\d{8}[- ]?|\d{6}[- ])\d{4}\b/g, (_match, head) => head + stars);
+}
+
 // Applied to already-escaped text, so only well-formed http(s)/tel/mailto
 // URLs get turned into real links -- no way to smuggle a javascript: URI.
 function linkify(text) {
@@ -546,7 +559,7 @@ function inline(text) {
 // Minimal markdown: headings, paragraphs, bullet/numbered lists, **bold**,
 // [text](url). Enough for the agent's structured replies without a full lib.
 function renderMarkdown(raw) {
-  const lines = escapeHtml(raw).split("\n");
+  const lines = maskPersonnummer(escapeHtml(raw), "&#42;&#42;&#42;&#42;").split("\n");
   let html = "";
   let listType = null;
   let listItems = [];
@@ -652,7 +665,7 @@ function speak(text, lang, btn) {
     return;
   }
   window.speechSynthesis.cancel();
-  const utterance = new SpeechSynthesisUtterance(stripMarkdownForSpeech(text));
+  const utterance = new SpeechSynthesisUtterance(stripMarkdownForSpeech(maskPersonnummer(text)));
   utterance.lang = lang;
   const voice = pickVoice(lang);
   if (voice) utterance.voice = voice;
@@ -709,7 +722,7 @@ function addBubble(role, text, { markdown = false, label = "", speakable = false
   if (markdown) {
     div.insertAdjacentHTML("beforeend", renderMarkdown(text));
   } else {
-    div.appendChild(document.createTextNode(text));
+    div.appendChild(document.createTextNode(maskPersonnummer(text)));
   }
   if (speakable && labelEl) {
     addSpeakButton(labelEl, text);
@@ -881,7 +894,7 @@ function showAttachmentViewer(attachment) {
 
     const content = document.createElement("pre");
     content.className = "attachment-viewer-content";
-    content.textContent = attachment.text;
+    content.textContent = maskPersonnummer(attachment.text);
     modal.appendChild(content);
   }
 
@@ -1237,6 +1250,22 @@ function addForm(form) {
   let formSubmitted = false;
   let formSaved = false; // guards against POSTing the same confirmed form twice
 
+  // BankID already verified the customer's identity before this form is shown,
+  // so on the document-filled form the personnummer is not rendered again (see
+  // renderEditableFields / renderSummary). It is still kept in `values` so it is
+  // submitted, saved and shown in the CS viewer -- and pre-seeded when the
+  // document had none, so the "all fields filled" check can't block submitting.
+  const hidesPersonnummer = form.type === "customer_details";
+  if (hidesPersonnummer) {
+    const idField = form.fields.find((f) => f.name === "personnummer");
+    if (idField) {
+      values.personnummer =
+        idField.value !== null && idField.value !== undefined && String(idField.value).trim()
+          ? String(idField.value)
+          : "BankID-verified";
+    }
+  }
+
   if (form.title) {
     const title = document.createElement("h3");
     title.textContent = form.title;
@@ -1257,6 +1286,7 @@ function addForm(form) {
   function renderEditableFields() {
     fieldsContainer.innerHTML = "";
     for (const field of form.fields) {
+      if (hidesPersonnummer && field.name === "personnummer") continue;
       const fieldEl = document.createElement("div");
       fieldEl.className = "inline-form-field";
 
@@ -1319,7 +1349,14 @@ function addForm(form) {
       label.textContent = field.label;
       const value = document.createElement("span");
       value.className = "inline-form-summary-value";
-      value.textContent = values[field.name] || "—";
+      if (hidesPersonnummer && field.name === "personnummer") {
+        label.textContent = currentLang === "sv" ? "Personnummer" : "Personal ID number";
+        value.textContent = currentLang === "sv" ? "Verifierat via BankID" : "Verified via BankID";
+        row.append(label, value);
+        fieldsContainer.appendChild(row);
+        continue;
+      }
+      value.textContent = maskPersonnummer(values[field.name]) || "—";
       row.append(label, value);
       fieldsContainer.appendChild(row);
     }
@@ -2296,7 +2333,7 @@ function saveChatList(list) {
 // title) - kept alongside title/ts precisely so the search box below can
 // find a past chat by anything said in it, not only by its opening line.
 function buildSearchText(messages) {
-  return messages.map((m) => m.content || "").join(" \n ").toLowerCase();
+  return messages.map((m) => maskPersonnummer(m.content) || "").join(" \n ").toLowerCase();
 }
 
 function upsertChatListEntry() {
@@ -2308,7 +2345,7 @@ function upsertChatListEntry() {
     existing.searchText = buildSearchText(history);
   } else {
     const firstUserMsg = history.find((m) => m.role === "user");
-    const title = firstUserMsg ? firstUserMsg.content.slice(0, 60) : "Chat";
+    const title = firstUserMsg ? maskPersonnummer(firstUserMsg.content).slice(0, 60) : "Chat";
     list.unshift({ id: sessionId, title, ts: Date.now(), searchText: buildSearchText(history) });
   }
   saveChatList(list);
@@ -2363,7 +2400,8 @@ function renderChatList() {
   const filtered = query
     ? list.filter(
         (chat) =>
-          (chat.title || "").toLowerCase().includes(query) || (chat.searchText || "").includes(query)
+          (maskPersonnummer(chat.title) || "").toLowerCase().includes(query) ||
+          (maskPersonnummer(chat.searchText) || "").includes(query)
       )
     : list;
 
@@ -2381,10 +2419,11 @@ function renderChatList() {
     const item = document.createElement("div");
     item.className = "chat-item" + (chat.id === sessionId ? " active" : "");
 
+    const chatTitle = maskPersonnummer(chat.title) || "Chat";
     const title = document.createElement("div");
     title.className = "chat-item-title";
-    title.textContent = chat.title || "Chat";
-    title.title = chat.title || "Chat";
+    title.textContent = chatTitle;
+    title.title = chatTitle;
     title.setAttribute("role", "button");
     title.tabIndex = 0;
     title.addEventListener("click", () => loadChat(chat.id));
@@ -2399,11 +2438,11 @@ function renderChatList() {
     remove.type = "button";
     remove.className = "chat-delete-btn";
     remove.title = "Delete chat";
-    remove.setAttribute("aria-label", `Delete chat: ${chat.title || "Chat"}`);
+    remove.setAttribute("aria-label", `Delete chat: ${chatTitle}`);
     remove.textContent = "×";
     remove.addEventListener("click", (event) => {
       event.stopPropagation();
-      deleteChat(chat.id, chat.title || "Chat");
+      deleteChat(chat.id, chatTitle);
     });
 
     item.append(title, remove);
