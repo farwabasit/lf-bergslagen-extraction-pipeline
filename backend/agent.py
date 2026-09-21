@@ -35,6 +35,7 @@ from .tools import (
     get_case_status,
     get_customer_portfolio,
     get_customer_portfolio_structured,
+    is_personnummer_field,
     request_callback,
     submit_insurance_application,
     verify_customer_by_personnummer,
@@ -107,25 +108,14 @@ FORM FILLING: when the user says "fill the form" or clearly asks you to complete
 form from an uploaded document, call fill_customer_form with the text from the attached
 document(s). Use the returned JSON as the form data and show the customer what was
 filled, leaving missing values for them to review or complete. If no document is
-attached, ask them to upload one first. When presenting the output of
-fill_customer_form, translate the form field labels (the JSON "label" values) into
-the user's current chat language. Keep the underlying extracted values exactly as
-they are; do not translate names, addresses, or document content. Only translate
-the labels. For English, use translations such as: "Fullständigt namn" -> "Full
-name", "Personnummer" -> "Personal ID number", "Adress" -> "Address",
-"Postnummer" -> "Postcode", "Ort" -> "City", "Telefon" -> "Phone", "E-post"
--> "Email", "Boendeform" -> "Type of housing", "Bostadsyta" -> "Living area",
-"Antal rum" -> "Number of rooms", "Byggnadsår" -> "Year built", "Bostadens
-värde (lösöre)" -> "Value of movable property", "Försäkringstyp" -> "Insurance
-type", "Önskat tillägg" -> "Additional cover", and "Försäkringen önskas starta"
--> "Desired start date". If the user is chatting in Swedish, keep the Swedish
-labels as-is. When you list the extracted form fields, do NOT include the
-personnummer (Personal ID number) in that list: the customer already verified it
-via BankID, and the form no longer shows it. Instead, after the list, add one
-standalone sentence in the user's current chat language. In English: "Please note:
-your Personal ID number was verified via BankID and does not need to be provided
-again." In Swedish: "Observera: ditt personnummer verifierades via BankID och
-behöver inte anges igen."
+attached, ask them to upload one first. The tool already translates each field's
+"label" into the current chat language itself and omits the personnummer field
+entirely (identity is verified via BankID separately, not shown again here) - relay
+the JSON's field names/labels and values exactly as returned, do not re-translate or
+otherwise edit them yourself. If the JSON includes a "note" field, append it verbatim
+as a standalone sentence after the list of fields - it is already worded correctly
+in the current chat language; never compose your own version of it and never
+translate it.
 
 After the first filled form has been shown, follow these rules before calling
 fill_customer_form again:
@@ -1381,12 +1371,25 @@ def _run_agent(
             name = call.function.name
             if name == "fill_customer_form":
                 result = fill_customer_form(
-                    args.get("extracted_text", ""), args.get("form_template")
+                    args.get("extracted_text", ""), args.get("form_template"), lang
                 )
                 try:
                     filled_form = json.loads(result)
                 except json.JSONDecodeError:
                     filled_form = None
+                if filled_form:
+                    # filled_form (sent to the frontend as extra["form"]) keeps
+                    # the personnummer field so the case record and the
+                    # printable /forms/<id> page still have it. What the model
+                    # itself sees below has that field stripped out entirely -
+                    # not just an instruction to skip it - so it physically
+                    # cannot narrate the value into its reply, the same class
+                    # of bug that made it blend languages when only told not to.
+                    visible_fields = [
+                        f for f in filled_form.get("fields", [])
+                        if not is_personnummer_field(f.get("name", ""), f.get("label", ""))
+                    ]
+                    result = json.dumps({**filled_form, "fields": visible_fields}, ensure_ascii=False)
             elif name == "submit_insurance_application":
                 result = submit_insurance_application(history, args.get("product", "insurance"), lang)
                 insurance_confirmation_text = result

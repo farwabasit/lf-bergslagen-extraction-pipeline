@@ -205,7 +205,7 @@ def fetch_lf_page(topic: str) -> str:
     return result
 
 
-def fill_customer_form(extracted_text: str, form_template: dict | None = None) -> str:
+def fill_customer_form(extracted_text: str, form_template: dict | None = None, lang: str | None = None) -> str:
     """Populate a form from realistic Swedish insurance application text.
 
     Handles Swedish and English aliases, bullets, bold headings with values on
@@ -341,9 +341,24 @@ def fill_customer_form(extracted_text: str, form_template: dict | None = None) -
     )
 
     populated_fields = []
+    personnummer_field_seen = False
     for field in template.get("fields", []):
         name = str(field.get("name", "field"))
         label = str(field.get("label", name.replace("_", " ").title()))
+        if is_personnummer_field(name, label):
+            # The value itself is kept in "fields" below (needed for the
+            # submitted case record and the printable /forms/<id> page the
+            # customer can review), but it's never narrated in chat: the
+            # frontend's inline form widget hides this one input and shows
+            # "Verified via BankID" instead (see addForm's hidesPersonnummer
+            # in app.js), and agent.py strips this field out of what the
+            # model itself is shown before relaying PERSONNUMMER_VERIFIED_NOTE
+            # below as a standalone sentence - composing that sentence, or
+            # narrating this field, has repeatedly come out in the wrong
+            # language when left to the model.
+            personnummer_field_seen = True
+        elif lang != "sv":
+            label = _english_label(name, label)
         populated_fields.append({
             **field,
             "name": name,
@@ -352,7 +367,10 @@ def fill_customer_form(extracted_text: str, form_template: dict | None = None) -
             "required": field.get("required", False),
         })
 
-    return json.dumps({**template, "fields": populated_fields}, ensure_ascii=False)
+    result = {**template, "fields": populated_fields}
+    if personnummer_field_seen:
+        result["note"] = PERSONNUMMER_VERIFIED_NOTE["sv" if lang == "sv" else "en"]
+    return json.dumps(result, ensure_ascii=False)
 
 
 # Guards submit_insurance_application against being called before a real
@@ -642,6 +660,52 @@ def _fold(text: str) -> str:
     "Orebro" and "Malmo" are common ASCII spellings of "Örebro"/"Malmö"."""
     decomposed = unicodedata.normalize("NFKD", (text or "").strip().lower())
     return "".join(c for c in decomposed if not unicodedata.combining(c))
+
+
+# name -> canonical English label, for fields fill_customer_form recognizes
+# by their default name (the common case: a custom form_template still uses
+# these same names even when it writes its own, often Swedish, labels).
+_FIELD_NAME_TO_ENGLISH_LABEL = {name: label for name, label, _aliases in DEFAULT_CUSTOMER_FORM_FIELDS}
+
+
+def _strip_trailing_number(text: str) -> str:
+    return re.sub(r"\s*\d+$", "", text).strip()
+
+
+# folded label alias (Swedish or English, trailing "1"/"2" stripped so
+# "Önskat tillägg 1"/"2" both match "Önskat tillägg") -> canonical English
+# label, for fields whose custom label doesn't match a recognized name.
+_LABEL_ALIAS_TO_ENGLISH: dict[str, str] = {}
+for _name, _label, _aliases in DEFAULT_CUSTOMER_FORM_FIELDS:
+    for _alias in _aliases:
+        _key = _fold(_strip_trailing_number(_alias))
+        _LABEL_ALIAS_TO_ENGLISH.setdefault(_key, _strip_trailing_number(_label))
+
+
+def _english_label(name: str, label: str) -> str:
+    """Best-effort translation of a (possibly Swedish, possibly
+    model-invented) form field label into English, used so a reply in an
+    English chat doesn't end up quoting the raw Swedish labels a custom
+    form_template wrote for itself - relying on the model to translate them
+    itself on the fly has repeatedly produced replies that mix English prose
+    with untranslated Swedish labels."""
+    if name in _FIELD_NAME_TO_ENGLISH_LABEL:
+        return _FIELD_NAME_TO_ENGLISH_LABEL[name]
+    folded_label = _fold(_strip_trailing_number(re.sub(r"\s*\([^)]*\)", "", label)))
+    return _LABEL_ALIAS_TO_ENGLISH.get(folded_label, label)
+
+
+_PERSONNUMMER_FIELD_ALIASES = {_fold(alias) for alias in ("personnummer", "personal id number", "personal number", "ssn")}
+
+
+def is_personnummer_field(name: str, label: str) -> bool:
+    return _fold(name) in _PERSONNUMMER_FIELD_ALIASES or _fold(label) in _PERSONNUMMER_FIELD_ALIASES
+
+
+PERSONNUMMER_VERIFIED_NOTE = {
+    "en": "Please note: your Personal ID number was verified via BankID and does not need to be provided again.",
+    "sv": "Observera: ditt personnummer verifierades via BankID och behöver inte anges igen.",
+}
 
 
 def _in_lf_bergslagen_area(location: str) -> bool:
