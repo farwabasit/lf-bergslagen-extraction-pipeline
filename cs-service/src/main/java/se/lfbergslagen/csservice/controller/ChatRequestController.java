@@ -126,11 +126,7 @@ public class ChatRequestController {
 
         String url = pythonAppBaseUrl + "/api/sessions/" + sessionId + "/human-message";
         try {
-            restTemplate.postForEntity(
-                    url,
-                    Map.of("content", request.getMessage(), "agent_name", request.getAgent()),
-                    Map.class
-            );
+            postWithRetry(url, Map.of("content", request.getMessage(), "agent_name", request.getAgent()));
         } catch (RestClientException ex) {
             return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
                     .body(Map.of(
@@ -155,10 +151,38 @@ public class ChatRequestController {
     private void notifyPythonAppOfAssignedAgent(String sessionId, String agentName) {
         String url = pythonAppBaseUrl + "/api/sessions/" + sessionId + "/assign-agent";
         try {
-            restTemplate.postForEntity(url, Map.of("agent_name", agentName), Map.class);
+            postWithRetry(url, Map.of("agent_name", agentName));
         } catch (RestClientException ignored) {
             // Non-critical - the customer will still see the agent's name
             // once an actual reply arrives via /human-message.
+        }
+    }
+
+    // Retries a couple of times with a short backoff before giving up - the
+    // Python app being mid-restart (e.g. its dev auto-reloader) or a brief
+    // network stall is exactly the kind of one-off hiccup that shouldn't
+    // cost a CS rep's reply during a live demo. Only the LAST attempt's
+    // exception propagates, so callers see the same RestClientException
+    // they always did if every attempt fails.
+    private static final int RELAY_RETRY_ATTEMPTS = 3;
+    private static final long RELAY_RETRY_BACKOFF_MILLIS = 400;
+
+    private void postWithRetry(String url, Map<String, ?> body) {
+        for (int attempt = 1; attempt <= RELAY_RETRY_ATTEMPTS; attempt++) {
+            try {
+                restTemplate.postForEntity(url, body, Map.class);
+                return;
+            } catch (RestClientException ex) {
+                if (attempt == RELAY_RETRY_ATTEMPTS) {
+                    throw ex;
+                }
+                try {
+                    Thread.sleep(RELAY_RETRY_BACKOFF_MILLIS * attempt);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw ex;
+                }
+            }
         }
     }
 

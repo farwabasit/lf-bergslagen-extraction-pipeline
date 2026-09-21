@@ -50,6 +50,12 @@ const I18N = {
     humanConnecting: "Connecting...",
     humanNote:
       "You've asked to speak with a colleague at LF Bergslagen. They'll join this chat as soon as they're available — keep this page open.",
+    // Shown instead of humanNote when the backend couldn't reach the CS
+    // team's app at all (cs_app_notified: false) - still non-alarming, but
+    // honest that this may take a little longer than usual, rather than
+    // silently promising an imminent reply that may never come.
+    humanNoteDelayed:
+      "You've asked to speak with a colleague at LF Bergslagen. We're having trouble reaching the team right now, but your request has been saved — keep this page open and they'll join as soon as possible.",
     agentJoinedSuffix: "has joined the chat and will respond shortly.",
     attachTitle: "Attach a document",
     micTitle: "Speak instead of typing",
@@ -114,6 +120,8 @@ const I18N = {
     humanConnecting: "Kopplar upp...",
     humanNote:
       "Du har bett om att prata med en kollega på LF Bergslagen. De ansluter till chatten så snart de kan — håll sidan öppen.",
+    humanNoteDelayed:
+      "Du har bett om att prata med en kollega på LF Bergslagen. Vi har just nu problem att nå teamet, men din förfrågan är sparad — håll sidan öppen så ansluter de så snart som möjligt.",
     agentJoinedSuffix: "har anslutit till chatten och svarar snart.",
     attachTitle: "Bifoga ett dokument",
     micTitle: "Prata istället för att skriva",
@@ -249,6 +257,15 @@ langToggleEl.addEventListener("click", (e) => {
 });
 
 let history = [];
+// The backend's own classify_topic() result for this chat (see
+// topic_classifier.py) - the same value that decides which specialist flow
+// handled the last turn. Used only to keep the "My home purchase" sidebar
+// panel from showing up in an unrelated flow (see loadPlan): a customer's
+// home-purchase plan is still hers, but it has nothing to do with, say, a
+// fraud report or a "show me my current products" lookup happening in
+// THIS chat, even if she's verified.
+let currentTopic = null;
+const PLAN_IRRELEVANT_TOPICS = ["fraud_report", "transaction_dispute", "portfolio_inquiry"];
 let stagedFiles = [];
 let ratingSubmitted = false; // this session already sent a satisfaction rating
 let sessionMessageCount = 0; // how many session-store messages we've already accounted for
@@ -312,6 +329,16 @@ let planPanelCollapsed = localStorage.getItem("ltn-plan-collapsed") === "1";
 
 function clearPlanPanel() {
   planPanelEl.innerHTML = "";
+}
+
+// Unlike renderEmptyPlan (which still shows a "create your home purchase
+// plan" prompt - the customer just hasn't started one yet), this is for a
+// chat whose current flow has nothing to do with home purchase at all (see
+// PLAN_IRRELEVANT_TOPICS) - the panel should disappear entirely, not offer
+// to create an unrelated plan.
+function hidePlanPanel() {
+  clearPlanPanel();
+  planPanelEl.hidden = true;
 }
 
 // Shared by renderEmptyPlan/renderPlan below: a header row with the title
@@ -427,6 +454,10 @@ async function fetchPlanFor(forSessionId) {
 
 async function loadPlan() {
   const requestedSessionId = sessionId;
+  if (PLAN_IRRELEVANT_TOPICS.includes(currentTopic)) {
+    hidePlanPanel();
+    return;
+  }
   try {
     let plan = await fetchPlanFor(requestedSessionId);
     // The user can switch/start a chat while this request is in flight (e.g.
@@ -1008,7 +1039,10 @@ function setAuthenticatedSidebarVisible(visible) {
   }
   sidebarWasAuthenticated = visible;
   chatsSectionEl.hidden = !visible;
-  planPanelEl.hidden = !visible;
+  // Being verified is necessary but not sufficient - this chat's own
+  // current flow also has to actually be about home purchase (see
+  // PLAN_IRRELEVANT_TOPICS and loadPlan's matching check above).
+  planPanelEl.hidden = !visible || PLAN_IRRELEVANT_TOPICS.includes(currentTopic);
 }
 
 // Collapse/expand for the "Chats" section - same persisted-per-browser
@@ -1687,6 +1721,64 @@ function addDocumentReview(review) {
   messagesEl.scrollTop = messagesEl.scrollHeight;
 }
 
+// --- Product portfolio card grid (see extra["portfolio"] from agent.py's
+// deterministic portfolio flow) - a styled card per product with an icon
+// keyed off its category, instead of the plain bullet-list text the
+// backend used to narrate. ---
+const PORTFOLIO_CATEGORY_ICONS = {
+  home_insurance: "🏠",
+  car_insurance: "🚗",
+  savings: "💰",
+  mortgage: "🏦",
+  life_insurance: "❤️",
+  pension: "🧓",
+};
+
+function formatDetailLabel(key) {
+  return key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function addPortfolio(portfolio) {
+  if (!portfolio || !portfolio.products || !portfolio.products.length) return;
+
+  const wrapper = document.createElement("div");
+  wrapper.className = "portfolio-wrapper";
+
+  const heading = document.createElement("div");
+  heading.className = "portfolio-heading";
+  heading.textContent =
+    currentLang === "sv"
+      ? `${portfolio.customer_name}s produkter hos LF Bergslagen`
+      : `${portfolio.customer_name}'s LF Bergslagen products`;
+  wrapper.appendChild(heading);
+
+  const grid = document.createElement("div");
+  grid.className = "portfolio-grid";
+
+  for (const product of portfolio.products) {
+    const card = document.createElement("div");
+    card.className = "portfolio-card";
+    const icon = PORTFOLIO_CATEGORY_ICONS[product.category] || "📄";
+    const detailRows = Object.entries(product.details || {})
+      .map(([key, value]) => `<dt>${escapeHtml(formatDetailLabel(key))}</dt><dd>${escapeHtml(String(value))}</dd>`)
+      .join("");
+    card.innerHTML = `
+      <div class="portfolio-card-icon" aria-hidden="true">${icon}</div>
+      <div class="portfolio-card-body">
+        <h4 class="portfolio-card-title">${escapeHtml(product.name)}</h4>
+        ${product.product_type ? `<p class="portfolio-card-type">${escapeHtml(product.product_type)}</p>` : ""}
+        ${product.size ? `<p class="portfolio-card-size">${escapeHtml(product.size)}</p>` : ""}
+        ${detailRows ? `<dl class="portfolio-card-details">${detailRows}</dl>` : ""}
+      </div>
+    `;
+    grid.appendChild(card);
+  }
+
+  wrapper.appendChild(grid);
+  messagesEl.appendChild(wrapper);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
 // --- Satisfaction rating: a small, optional "how helpful was this chat"
 // star control. Never blocks the conversation - it just becomes visible
 // once there's been at least one reply, and can be clicked at any time. ---
@@ -1745,6 +1837,15 @@ async function getAssistantReply() {
   authStatusPending = false;
   inputEl.disabled = true;
   sendBtn.disabled = true;
+  // request-human has no message body of its own - it reads whatever this
+  // session's transcript already has saved server-side (main.py's
+  // sessions.get). Clicking "Contact us" while THIS call is still in
+  // flight races that save: cs-service rejects an empty transcript
+  // outright, and since a retry there just resends the same (still empty)
+  // transcript, the hand-off silently never registers - a real bug this
+  // reproduced consistently, not a hypothetical. Disabling the button for
+  // the duration of every send closes the window entirely.
+  humanBtn.disabled = true;
 
   try {
     const res = await fetch("/api/chat", {
@@ -1774,6 +1875,7 @@ async function getAssistantReply() {
     addSpeakButton(labelEl, data.content);
     pending.className = "msg assistant";
     history.push({ role: "assistant", content: data.content });
+    currentTopic = data.topic || currentTopic;
     sessionMessageCount += 2; // the server just appended one user + one assistant message
     upsertChatListEntry();
     // The auth card is the interaction; its BankID chip would just duplicate it.
@@ -1790,6 +1892,7 @@ async function getAssistantReply() {
     } else {
       renderForm(data.form);
     }
+    addPortfolio(data.portfolio);
     addOffers(data.offers, data.offers_customer_id);
     addComparisonTable(data.comparison_table);
     addDocumentReview(data.document_review);
@@ -1810,6 +1913,7 @@ async function getAssistantReply() {
   } finally {
     inputEl.disabled = false;
     sendBtn.disabled = false;
+    humanBtn.disabled = false;
     inputEl.focus();
   }
 }
@@ -2098,8 +2202,14 @@ async function requestHumanHandoff() {
   humanBtn.disabled = true;
   humanBtnLabel.textContent = t().humanConnecting;
   try {
-    await fetch(`/api/sessions/${sessionId}/request-human`, { method: "POST" });
-    addBubble("system-note", t().humanNote);
+    const res = await fetch(`/api/sessions/${sessionId}/request-human`, { method: "POST" });
+    // cs_app_notified reflects whether the backend's own retried attempts
+    // (see cs_client.notify_chat_request) actually reached the CS team's
+    // app - false after those retries means it's genuinely down, not a
+    // one-off blip, so it's worth saying so instead of implying help is
+    // seconds away when it may not be.
+    const data = await res.json().catch(() => ({}));
+    addBubble("system-note", data.cs_app_notified === false ? t().humanNoteDelayed : t().humanNote);
     humanHandoffActive = true;
   } catch (err) {
     console.error(err);
@@ -2120,12 +2230,24 @@ humanBtn.addEventListener("click", requestHumanHandoff);
 // exact duplicate message/offer bug this flag prevents.
 let pollInFlight = false;
 
-async function pollForHumanMessages() {
+// One quick, bounded retry after a failed poll (network blip, or the
+// backend mid-restart), instead of leaving a missed human reply to sit
+// until the next full 3s tick (or longer, in a backgrounded tab where
+// pollForHumanMessages otherwise only gets triggered again by
+// visibilitychange). A single retry keeps this from turning into a tight
+// loop if the backend is genuinely down for a while - the regular interval
+// picks it back up regardless.
+const POLL_RETRY_DELAY_MS = 1000;
+
+async function pollForHumanMessages(isRetry = false) {
   if (pollInFlight) return;
   pollInFlight = true;
   try {
     const res = await fetch(`/api/sessions/${sessionId}/poll?after=${sessionMessageCount}`);
-    if (!res.ok) return;
+    if (!res.ok) {
+      if (!isRetry) setTimeout(() => pollForHumanMessages(true), POLL_RETRY_DELAY_MS);
+      return;
+    }
     const data = await res.json();
     updateProgressRing(data.progress);
 
@@ -2149,7 +2271,11 @@ async function pollForHumanMessages() {
     addOffers(data.offers, data.offers_customer_id);
     sessionMessageCount = data.next_after;
   } catch (err) {
-    // silent -- this is a background poll, not a user-initiated action
+    // Silent -- this is a background poll, not a user-initiated action --
+    // but still worth one quick retry (a dropped fetch, e.g. the backend
+    // mid-restart, is the same transient case the !res.ok branch above
+    // handles) rather than only the regular next-interval tick.
+    if (!isRetry) setTimeout(() => pollForHumanMessages(true), POLL_RETRY_DELAY_MS);
   } finally {
     pollInFlight = false;
   }
@@ -2375,6 +2501,7 @@ function resetChatView() {
 function startNewChat() {
   if (speechSupported) window.speechSynthesis.cancel();
   history = [];
+  currentTopic = null;
   sessionMessageCount = 0;
   humanHandoffActive = false;
   lastKnownAgent = null;
@@ -2426,6 +2553,7 @@ async function applySessionData(id, data) {
     humanHandoffActive = Boolean(data.needs_human);
     lastKnownAgent = data.assigned_agent || null;
     activeForm = null;
+    currentTopic = data.topic || null;
     history = data.messages
       .filter((m) => m.role === "user" || m.role === "assistant")
       .map((m) => ({ role: m.role, content: m.content }));

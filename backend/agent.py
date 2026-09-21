@@ -34,6 +34,7 @@ from .tools import (
     find_service_provider,
     get_case_status,
     get_customer_portfolio,
+    get_customer_portfolio_structured,
     request_callback,
     submit_insurance_application,
     verify_customer_by_personnummer,
@@ -374,23 +375,11 @@ cover what's actually relevant and next for their stage, mention the rest as thi
 come back to later rather than silently leaving them out entirely.
 
 PORTFOLIO IDENTITY FLOW: when the user asks about their existing product portfolio, this
-touches a real customer's account, so never skip verification and never guess or assume an
-identity from earlier in the conversation. (Reporting fraud or disputing a transaction is
-handled by a separate specialist flow before your turn even starts — you won't see those
-requests.)
-1. Ask for their full name, personnummer, and date of birth together in one message,
-   explaining briefly that this is needed to verify their identity before you can look at
-   their account. Don't proceed without all three.
-2. Once you have all three, call verify_customer_identity with exactly what they gave you.
-   Trust only what it returns — never say "verified" unless the tool result says VERIFIED,
-   and never invent a customer_id.
-3. If it returns NOT VERIFIED, say so plainly, ask them to double-check the details (a
-   typo in the personnummer is the most common cause), and offer to connect them with
-   customer service as a fallback — don't retry silently or guess at a fix.
-4. If it returns VERIFIED, call get_customer_portfolio with the customer_id and report
-   exactly what it returns — don't invent or guess at products that aren't in the result.
-   Remember tool results aren't kept between turns - if you need the customer_id again on
-   a later turn, call verify_customer_identity again first, don't reuse or guess one.
+is handled entirely before your turn even starts — a deterministic BankID check, then a
+direct product-list lookup, with no LLM step in between (see PORTFOLIO_AUTH_TEXT in
+agent.py). You won't see these requests until after that's already resolved, at which
+point just answer follow-up questions about the products already shown - don't re-verify
+or ask for a name/personnummer/date of birth yourself.
 
 CALLBACK REQUEST FLOW: when the user wants a customer service agent to call them back,
 this does NOT need the identity verification flow above — it's a simple request, not an
@@ -979,11 +968,14 @@ ATTACHMENT_AUTH_REQUIRED_TEXT = {
 }
 
 
-# Same nudge pattern again: asking about a product portfolio requires
-# identity verification first (see PORTFOLIO IDENTITY FLOW in the system
-# prompt) - remind the model every turn until a result shows the flow
-# actually finished. (Fraud/dispute used to live here too, but that's now
-# its own deterministic flow - see fraud_dispute_agent.py.)
+# Asking about a product portfolio touches a real customer's account, so
+# it's gated behind the same deterministic BankID-only check as the
+# mortgage/post-purchase flows (see run_loan_promise_agent) rather than the
+# LLM free-typing a name/personnummer/date-of-birth request - same
+# reliability reasoning as AUTH_CHOICE_TEXT above: a real BankID login
+# already knows who's confirming, so there's nothing else to ask for.
+# (Fraud/dispute used to live here too, but that's now its own deterministic
+# flow - see fraud_dispute_agent.py.)
 IDENTITY_FLOW_KEYWORDS = {
     "portfolio": [
         "product portfolio", "existing products", "current products",
@@ -991,7 +983,32 @@ IDENTITY_FLOW_KEYWORDS = {
         "nuvarande produkter", "min försäkringsportfölj", "mina produkter hos länsförsäkringar",
     ],
 }
-IDENTITY_FLOW_RESOLVED_MARKERS = ("Current products for",)
+IDENTITY_FLOW_RESOLVED_MARKERS = ("Current products for", "Nuvarande produkter för")
+
+PORTFOLIO_AUTH_TEXT = {
+    "en": (
+        "I hear you on wanting to see your current products — I can help with that! "
+        "Since this touches your actual account, I first need to verify your identity "
+        "via BankID."
+    ),
+    "sv": (
+        "Jag förstår att du vill se dina nuvarande produkter — det kan jag hjälpa till "
+        "med! Eftersom det här rör ditt faktiska konto behöver jag först verifiera din "
+        "identitet via BankID."
+    ),
+}
+
+# The actual product list is rendered by the frontend as cards from the
+# structured extra["portfolio"] payload (see get_customer_portfolio_structured),
+# not narrated here as text - this is just the short intro line above that
+# card. Each language's line still opens with the language's own marker
+# string (see IDENTITY_FLOW_RESOLVED_MARKERS) so _identity_flow_resolved
+# keeps recognizing this turn as the flow's completion, same as before this
+# was a card.
+PORTFOLIO_RESULT_TEXT = {
+    "en": "Current products for {name} — here's your full LF Bergslagen portfolio below.",
+    "sv": "Nuvarande produkter för {name} — här är din fullständiga LF Bergslagen-portfölj nedan.",
+}
 
 
 def _detect_identity_flow(history: list[dict]) -> str | None:
@@ -1082,6 +1099,25 @@ def _run_agent(
     if _home_purchase_stage_unclear(history):
         key = "sv" if lang == "sv" else "en"
         return HOME_PURCHASE_STAGE_TEXT[key], HOME_PURCHASE_STAGE_SUGGESTIONS[key], {}
+
+    # Product portfolio lookup - deterministic BankID gate, then a direct
+    # get_customer_portfolio_structured call with no LLM round-trip at all,
+    # same reasoning as run_loan_promise_agent's phase B (an LLM asked to
+    # report "current products" itself risks inventing or paraphrasing rows
+    # that aren't actually in the tool result). The structured result is
+    # rendered by the frontend as a portfolio card grid (see extra["portfolio"]).
+    if _detect_identity_flow(history) == "portfolio" and not _identity_flow_resolved(history):
+        key = "sv" if lang == "sv" else "en"
+        if not bankid_chosen(history):
+            return PORTFOLIO_AUTH_TEXT[key], AUTH_CHOICE_SUGGESTIONS[key], {"form": AUTH_CHOICE_FORM}
+        verified = verify_customer_by_personnummer(BANKID_DEMO_PERSONNUMMER)
+        if not verified:
+            return PORTFOLIO_AUTH_TEXT[key], AUTH_CHOICE_SUGGESTIONS[key], {"form": AUTH_CHOICE_FORM}
+        portfolio = get_customer_portfolio_structured(verified["customer_id"])
+        if not portfolio:
+            return get_customer_portfolio(verified["customer_id"]), [], {}
+        reply = PORTFOLIO_RESULT_TEXT[key].format(name=portfolio["customer_name"])
+        return reply, [], {"portfolio": portfolio}
 
     # Fallback gate for every path above that didn't already claim the turn
     # (and so didn't already run its own identity check before touching a
@@ -1237,25 +1273,6 @@ def _run_agent(
             }
         )
 
-    identity_flow = _detect_identity_flow(history)
-    if identity_flow and not _identity_flow_resolved(history):
-        messages.append(
-            {
-                "role": "system",
-                "content": (
-                    "This is a portfolio request - follow the PORTFOLIO IDENTITY FLOW in "
-                    "your instructions exactly. Collect full name, personnummer, and date of "
-                    "birth if you don't have all three yet (ask for all three together, "
-                    "don't proceed without them). Once you have all three, call "
-                    "verify_customer_identity and trust only what it returns - never assume "
-                    "verified. If verified, call get_customer_portfolio and report exactly "
-                    "what it returns. Remember tool results aren't kept between turns - if "
-                    "you need the customer_id again on a later turn, call "
-                    "verify_customer_identity again, never reuse or guess one."
-                ),
-            }
-        )
-
     if _wants_callback(history) and not _callback_already_resolved(history):
         messages.append(
             {
@@ -1290,11 +1307,11 @@ def _run_agent(
     # These flows already have explicit tool-calling instructions of their
     # own, so skip the forced call and let the model ask its question first.
     structured_flow_active = bool(
-        # _home_purchase_stage_unclear is deliberately not listed here - it's
-        # now an early return in _run_agent (see HOME_PURCHASE_STAGE_TEXT),
-        # so this point is never reached while it's true.
+        # _home_purchase_stage_unclear and the portfolio identity flow are
+        # deliberately not listed here - they're now early returns in
+        # _run_agent (see HOME_PURCHASE_STAGE_TEXT and PORTFOLIO_AUTH_TEXT),
+        # so this point is never reached while either is true.
         (_detect_service_category(history) and not _service_already_resolved(history))
-        or (_detect_identity_flow(history) and not _identity_flow_resolved(history))
         or (_wants_callback(history) and not _callback_already_resolved(history))
         or _wants_case_status(history)
         or _wants_home_search(history)

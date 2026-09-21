@@ -131,6 +131,20 @@ function formatType(type) {
   return type.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+// CaseType has no dedicated entry per insurance product (see CaseType.java -
+// every insurance application, home/car/etc., is filed as generic "OTHER"
+// with the actual product name in extra.product instead, from
+// submit_insurance_application in the Python assistant's tools.py). Showing
+// literal "Other" as the case subject hides exactly the thing an Advisor
+// needs to see first - fall back to that product name instead whenever it's
+// present, rather than the raw enum value.
+function caseSubject(c) {
+  if (c.type === "OTHER" && c.extra && c.extra.product) {
+    return c.extra.product.replace(/\b\w/g, (ch) => ch.toUpperCase());
+  }
+  return formatType(c.type);
+}
+
 function formatStatus(status) {
   return status.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
 }
@@ -167,7 +181,7 @@ async function loadCases() {
       card.className = "card";
       card.innerHTML = `
         <div class="card-main">
-          <span class="card-title">${c.id} — ${formatType(c.type)}</span>
+          <span class="card-title">${c.id} — ${caseSubject(c)}</span>
           <span class="card-sub">${c.customerName || "Unknown customer"} · ${timeAgo(c.createdAt)}${c.assignedAgent ? ` · ${c.assignedAgent}` : ""}</span>
         </div>
         <span class="badge ${c.status}">${formatStatus(c.status)}</span>
@@ -201,7 +215,7 @@ function formatExtraKey(key) {
 }
 
 function openCaseModal(c) {
-  caseModalTitle.textContent = `${c.id} — ${formatType(c.type)}`;
+  caseModalTitle.textContent = `${c.id} — ${caseSubject(c)}`;
   const extra = c.extra || {};
   const extraRows = Object.entries(extra)
     .filter(([k]) => k !== "auditCustomerId")

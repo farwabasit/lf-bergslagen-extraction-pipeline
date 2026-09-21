@@ -740,6 +740,30 @@ def verify_customer_by_personnummer(personnummer: str) -> dict | None:
     return None
 
 
+def get_customer_portfolio_structured(customer_id: str) -> dict | None:
+    """Same data as get_customer_portfolio, structured for the frontend's
+    portfolio card view (see agent.py's deterministic portfolio flow)
+    instead of a single narrated string - each product keeps its own
+    name/type/size/details/category so the UI can lay them out as cards
+    with icons rather than a flat bullet list."""
+    customer = _find_customer(customer_id)
+    if not customer:
+        return None
+    return {
+        "customer_name": customer["name"],
+        "products": [
+            {
+                "name": product["name"],
+                "category": product.get("category"),
+                "product_type": product.get("product_type"),
+                "size": product.get("size"),
+                "details": product.get("details") or {},
+            }
+            for product in customer["portfolio"]
+        ],
+    }
+
+
 def get_customer_portfolio(customer_id: str) -> str:
     """List a verified customer's current LF Bergslagen products, with
     each product's size, specific plan/fund name, and other useful details
